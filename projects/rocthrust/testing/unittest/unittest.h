@@ -26,7 +26,7 @@
 #include <unittest/special_types.h>
 #include <unittest/testframework.h>
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 #  define THRUST_DEVICE_BACKEND                 hip
 #  define THRUST_DEVICE_BACKEND_DETAIL          hip_rocprim
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) hip##name
