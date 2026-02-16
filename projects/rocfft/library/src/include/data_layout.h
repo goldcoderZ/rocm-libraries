@@ -25,6 +25,7 @@
 
 #include <cstring>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -37,10 +38,10 @@ enum class io_data_label
 };
 
 /**
-  * @return `io_data_label::OUTPUT` for the argument value `io_data_label::INPUT` and vice versa. 
-  * @throw An `std::invalid_argument` is thrown if `io` is not `io_data_label::INPUT` 
-  * nor `io_data_label::OUTPUT`.
-  */
+ * @return `io_data_label::OUTPUT` for the argument value `io_data_label::INPUT` and vice versa.
+ * @throw An `std::invalid_argument` is thrown if `io` is not `io_data_label::INPUT`
+ * nor `io_data_label::OUTPUT`.
+ */
 io_data_label other(io_data_label io);
 
 /**
@@ -51,6 +52,18 @@ io_data_label other(io_data_label io);
  * nor `io_data_label::OUTPUT`.
  */
 std::string to_str(io_data_label io);
+
+constexpr bool is_real_domain(rocfft_transform_type fft_type, io_data_label io)
+{
+    return (fft_type == rocfft_transform_type_real_forward && io == io_data_label::INPUT)
+           || (fft_type == rocfft_transform_type_real_inverse && io == io_data_label::OUTPUT);
+}
+
+constexpr bool is_hermitian_domain(rocfft_transform_type fft_type, io_data_label io)
+{
+    return (fft_type == rocfft_transform_type_real_forward && io == io_data_label::OUTPUT)
+           || (fft_type == rocfft_transform_type_real_inverse && io == io_data_label::INPUT);
+}
 
 /**
  * @brief Helper structure encapsulating the details pertaining to the description
@@ -283,7 +296,7 @@ struct data_layout_t
      * are set to their default contiguous values.
      * 
      * @throw An `std::invalid_argument` is thrown if `first` and `second` are not
-     * dimensionally consistent.
+     * dimensionally consistent, or have different embedding sequences (if any).
      */
     static data_layout_t make_contiguous_intersection_of(const data_layout_t& first,
                                                          const data_layout_t& second);
@@ -293,6 +306,7 @@ struct data_layout_t
      * @return `true` if this data layout is dimensionally consistent with `other` 
      */
     bool is_dimensionally_consistent_with(const data_layout_t& other) const;
+
     /**
      * @return `true` if any length axis covers a partial range.
      */
@@ -344,6 +358,36 @@ struct data_layout_t
                                                               rocfft_transform_type fft_type,
                                                               bool other_innermost_length_is_odd
                                                               = false) const;
+
+    /**
+     * @return the data layout of a sub-dimensional data set embedded in what the current
+     * object captures.
+     * 
+     * @param[in] len_indices set of indices of the length axes of the current object
+     * that define the length axes of the sub-dimensional data sets of interest.
+     * @note Relative ordering of length axes is unchanged in the returned object when
+     * compared to this object's.
+     * @throw An `std::invalid_argument` exception is thrown if `len_indices` is empty,
+     * contains `get_len_rank()` or more elements, or if any of the values in `len_indices`
+     * is out of bounds. An `std::logic_error` exception is thrown if the current object
+     * is empty.
+     */
+    data_layout_t get_lower_dimensional_layout(const std::set<size_t>& len_indices) const;
+
+    /**
+     * @return the data layout of the higher-dimensional data set in which the current
+     * object is embedded.
+     * @throw An `std::logic_error` exception is thrown if the current object is empty,
+     * not representing the data layout of an embedded data set, or if its embedding
+     * map is found inconsistent.
+     */
+    data_layout_t get_embedding_layout() const;
+
+    /**
+     * @return `true` iff the current object is registered as the data layout of a
+     * data set embedded within another, higher-dimensional one.
+     */
+    bool is_embedded() const;
 
     //-------------------------------------------------------------------------
     //                        DEFAULT COPIES AND MOVES
@@ -397,6 +441,18 @@ private:
 
     std::vector<axis_t> len_axes;
     std::vector<axis_t> batch_axes;
+    // If the current object captures the data layout for sub-dimensional data sets
+    // embedded within another data set, an embedding map is required to keep track
+    // of which of the current object's axes correspond to the embedding set's length
+    // axes. `embedding_map_t` instances keep track of such information.
+    using embedding_map_t = std::vector<size_t>;
+    // Nested embeddings are possible, so the full sequence of embedding maps that
+    // define(d) the current object must be memorized. Unless `embedding_sequence` is
+    // empty, the current object captures the layout for data embedded within a higher
+    // dimensional data set of rank `embedding_sequence.back().size()`, for which the
+    // `j`-th length axis (`0 <= j < embedding_map.back().size()`) is the current
+    // object's axis of (flattened) index `embedding_sequence.back()[j]`.
+    std::vector<embedding_map_t> embedding_sequence;
 
     /**
      * @brief Implementation-simplifying helper accessor for the length and batch
@@ -427,6 +483,11 @@ private:
      * @param[in] len_axis_order a vector that is a permutation of
      * `{0, 1, ..., get_len_rank() - 1}`
      *
+     * @warning Unless trivial, this operation breaks consistency between this
+     * object and other ones representing an embedded, sub-dimensional data set
+     * (if any). If this object is embedded itself, consistency with its
+     * embedding data set is maintained in the operation.
+     * 
      * @throw An `std::invalid_argument` is thrown if `len_axis_order`
      * is not a permutation of `{0, 1, ..., get_len_rank() - 1}`.
      */

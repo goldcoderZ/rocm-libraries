@@ -1108,6 +1108,8 @@ struct MultiPlanItem
 
     // Check if this item writes to the specified BufferPtr
     virtual bool WritesToBuffer(const BufferPtr& ptr) const = 0;
+    // Check if this item reads from the specified BufferPtr
+    virtual bool ReadsFromBuffer(const BufferPtr& ptr) const = 0;
 
     // Check if the specified rank will execute this item
     virtual bool ExecutesOnRank(int rank) const = 0;
@@ -1187,6 +1189,11 @@ struct CommPointToPoint : public MultiPlanItem
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
         return ptr == destPtr;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == srcPtr;
     }
 
     bool ExecutesOnRank(int comm_rank) const override
@@ -1292,6 +1299,11 @@ struct CommScatter : public MultiPlanItem
         return false;
     }
 
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == srcPtr;
+    }
+
     bool ExecutesOnRank(int comm_rank) const override
     {
         return srcLocation.comm_rank == comm_rank
@@ -1390,6 +1402,17 @@ struct CommGather : public MultiPlanItem
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
         return ptr == destPtr;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& op : ops)
+        {
+            if(ptr == op.srcPtr)
+                return true;
+        }
+        return false;
+        ;
     }
 
     bool ExecutesOnRank(int comm_rank) const override
@@ -1492,6 +1515,12 @@ struct CommAllToAll : public MultiPlanItem
     {
         // only writes to receive buffer
         return ptr == recvBuf;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        // only reads from send buffer
+        return ptr == sendBuf;
     }
 
     bool ExecutesOnRank(int comm_rank) const override
@@ -1631,6 +1660,11 @@ struct ExecPlan : public MultiPlanItem
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
         return ptr == outputPtr;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == inputPtr;
     }
 
     bool ExecutesOnRank(int comm_rank) const override
