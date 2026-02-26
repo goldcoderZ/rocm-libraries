@@ -353,6 +353,16 @@ class LSUOn(LSU):
                                 elif kernel["ProblemType"]["ComputeDataType"].isInt32():
                                     moduleReduction.add(VAddI32(dst=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd)), src0=vgpr(vgprStr+regToAdd), \
                                                 src1=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd)), comment=""))
+                                elif kernel["ProblemType"]["ComputeDataType"].isSingleComplex():
+                                    moduleReduction.add(VAddF32(dst=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+0)), src0=vgpr(vgprStr+regToAdd+0), \
+                                                src1=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+0)), comment=""))
+                                    moduleReduction.add(VAddF32(dst=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+1)), src0=vgpr(vgprStr+regToAdd+1), \
+                                                src1=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+1)), comment=""))
+                                elif kernel["ProblemType"]["ComputeDataType"].isDoubleComplex():
+                                    moduleReduction.add(VAddF64(dst=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+0), 2), src0=vgpr(vgprStr+regToAdd+0, 2), \
+                                                src1=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+0)), comment=""))
+                                    moduleReduction.add(VAddF64(dst=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+2), 2), src0=vgpr(vgprStr+regToAdd+2, 2), \
+                                                src1=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+2), 2), comment=""))
                                 else:
                                 # TODO: hpa_half, int8
                                     assert(0) # unsupported data type, need to modify here and LSU write/read code
