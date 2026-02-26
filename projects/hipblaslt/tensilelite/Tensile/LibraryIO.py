@@ -281,21 +281,23 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
                         printWarning("Failed to write solution cache: {}".format(e))
     # write dictionaries
     with open(filename, "w") as f:
-        f.write("- MinimumRequiredVersion: {}\n".format(__version__))
-        f.write("- ProblemSizes:\n")
-        if problemSizes:
-            for sizeRange in problemSizes.ranges:
-                f.write("  - Range: {}\n".format(sizeRange))
-            for problemExact in problemSizes.exacts:
-                #FIXME-problem, this ignores strides:
-                f.write("  - Exact: {}\n".format(problemExact))
-        if biasTypeArgs:
-            f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
-        if activationArgs:
-            f.write("- ActivationArgs:\n")
-            for setting in activationArgs.settingList:
-                f.write("  - [Enum: %s]\n"%(setting.activationEnum))
-        fast_yaml_dump(solutionStates, f)
+        with timing_context("python_wsol_header"):
+            f.write("- MinimumRequiredVersion: {}\n".format(__version__))
+            f.write("- ProblemSizes:\n")
+            if problemSizes:
+                for sizeRange in problemSizes.ranges:
+                    f.write("  - Range: {}\n".format(sizeRange))
+                for problemExact in problemSizes.exacts:
+                    #FIXME-problem, this ignores strides:
+                    f.write("  - Exact: {}\n".format(problemExact))
+            if biasTypeArgs:
+                f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
+            if activationArgs:
+                f.write("- ActivationArgs:\n")
+                for setting in activationArgs.settingList:
+                    f.write("  - [Enum: %s]\n"%(setting.activationEnum))
+        with timing_context("python_wsol_dump"):
+            fast_yaml_dump(solutionStates, f)
 
 
 ###############################
