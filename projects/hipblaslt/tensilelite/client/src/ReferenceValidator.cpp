@@ -809,6 +809,8 @@ namespace TensileLite
 
             if(compareValid.errorCount() > 0 && m_printMax > 0)
             {
+                ScopedTimer timer("validate_mismatch_printing");
+
                 size_t printed = 0;
                 std::cout << "Index:  Device | Reference" << std::endl;
 
