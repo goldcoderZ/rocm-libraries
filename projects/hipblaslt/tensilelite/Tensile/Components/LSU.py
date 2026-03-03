@@ -164,6 +164,7 @@ class LSUOn(LSU):
         # Checkout local read resource
         bpr            = 4 #bytes per register
         bytesPerElem   = kernel["ProblemType"]["ComputeDataType"].numBytes()
+        regsPerElem = kernel["ProblemType"]["ComputeDataType"].numRegisters()
         bytesPerVector = self.LSUfullVws[0] * bytesPerElem
         numWaves       = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         regsPerStep = int((bytesPerVector+3)//4)
@@ -346,7 +347,7 @@ class LSUOn(LSU):
                             numLRWaitCnt = numTotalInst - numPassedInst
                             moduleReduction.add(SWaitCnt(dscnt=numLRWaitCnt, comment="wait count is (%u-%u)"%(numTotalInst, numPassedInst)))
                         if r > 0:
-                            for regToAdd in range(regsPerStore):
+                            for regToAdd in range(0, regsPerStore, regsPerElem):
                                 if kernel["ProblemType"]["ComputeDataType"].isSingle():
                                     moduleReduction.add(VAddF32(dst=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd)), src0=vgpr(vgprStr+regToAdd), \
                                                 src1=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd)), comment=""))
@@ -358,6 +359,7 @@ class LSUOn(LSU):
                                                 src1=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+0)), comment=""))
                                     moduleReduction.add(VAddF32(dst=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+1)), src0=vgpr(vgprStr+regToAdd+1), \
                                                 src1=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+1)), comment=""))
+                                    print(f"LSURED0:(%u,%u)"%(localReadVgprIdx+regToAdd,vgprStr+regToAdd))
                                 elif kernel["ProblemType"]["ComputeDataType"].isDoubleComplex():
                                     moduleReduction.add(VAddF64(dst=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+0), 2), src0=vgpr(vgprStr+regToAdd+0, 2), \
                                                 src1=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd+0)), comment=""))

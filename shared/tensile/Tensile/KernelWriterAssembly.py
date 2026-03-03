@@ -10499,6 +10499,7 @@ class KernelWriterAssembly(KernelWriter):
                          "c[%u] += c[%u], real part"%(cIdx, regIdx) )
             kStr += inst("v_add_f32", vgpr("ValuC+%u"%(cIdx+1)), vgpr("ValuC+%u" % (regIdx+1)), vgpr("ValuC+%u"%(cIdx+1)), \
                          "c[%u] += c[%u], imaginary part"%(cIdx+1, regIdx+1) )
+            print(f"LSURED0:(%u,%u)"%(cIdx,regIdx))
           elif kernel["ProblemType"]["ComputeDataType"].isDoubleComplex():
             kStr += inst("v_add_f64", vgpr("ValuC+%u"%(cIdx+0),2), vgpr("ValuC+%u" % (regIdx+0),2), vgpr("ValuC+%u"%(cIdx+0),2), \
                          "c[%u] += c[%u], real part"%(cIdx, regIdx) )

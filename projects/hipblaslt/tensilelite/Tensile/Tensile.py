@@ -488,6 +488,11 @@ def Tensile(userArgs):
     print1(HR)
     print1("#")
     print1("#  Tensile v%s" % (__version__))
+    # region dbpy_attach
+    # import debugpy
+    # (debugpy.listen(("0.0.0.0", 5678)), debugpy.wait_for_client()) if not debugpy.is_client_connected() else None
+    # endregion
+    
 
     argParser = argparse.ArgumentParser()
     argParser.add_argument("ConfigFile", type=os.path.realpath, nargs="+",
