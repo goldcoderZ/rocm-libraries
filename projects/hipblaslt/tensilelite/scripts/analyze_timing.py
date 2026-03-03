@@ -610,21 +610,24 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
             reverse=True,
         )[:10]
 
-        print(
-            f"  {'M':>8} {'N':>8} {'K':>8} {'Batch':>8}"
-            f" {'TypeA':>10} {'TypeD':>10}"
-            f" {'CPU Ref (ms)':>12} {'GPU (ms)':>10}"
-        )
-        print(f"  {'-' * (TABLE_WIDTH - 2)}")
+        # Compute column widths from data
+        headers = ["M", "N", "K", "Batch", "TypeA", "TypeD", "CPU Ref (ms)", "GPU (ms)"]
+        rows = []
         for p in sorted_problems:
             ctx = p.context
-            print(
-                f"  {ctx.get('M', '?'):>8} {ctx.get('N', '?'):>8}"
-                f" {ctx.get('K', '?'):>8} {ctx.get('batch', '?'):>8}"
-                f" {ctx.get('typeA', '?'):>10} {ctx.get('typeD', '?'):>10}"
-                f" {p.cpu_reference_gemm_ms:>12.2f}"
-                f" {p.gpu_kernel_execution_ms:>10.2f}"
-            )
+            rows.append([
+                ctx.get('M', '?'), ctx.get('N', '?'),
+                ctx.get('K', '?'), ctx.get('batch', '?'),
+                ctx.get('typeA', '?'), ctx.get('typeD', '?'),
+                f"{p.cpu_reference_gemm_ms:.2f}", f"{p.gpu_kernel_execution_ms:.2f}",
+            ])
+        col_widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
+
+        hdr = "  " + " ".join(f"{h:>{w}}" for h, w in zip(headers, col_widths))
+        print(hdr)
+        print(f"  {'-' * (TABLE_WIDTH - 2)}")
+        for row in rows:
+            print("  " + " ".join(f"{v:>{w}}" for v, w in zip(row, col_widths)))
         print()
 
 
