@@ -96,13 +96,13 @@ namespace rocisa
                     _setName2RegNum(regContainer.get(), assignmentDict);
                     if(regContainer->regType == "acc")
                         continue;
-                    std::cout << "Idx: " << regContainer->regIdx << " regNum: " << regContainer->regNum << std::endl;
+                    // std::cout << "Idx: " << regContainer->regIdx << " regNum: " << regContainer->regNum << std::endl;
                     for(int i = regContainer->regIdx;
                         i < regContainer->regIdx + regContainer->regNum;
                         ++i)
                     {
                         auto& gprvec = graph.getGprRef(regContainer->regType);
-                        std::cout << "i: " << i << " regContainer: " << regContainer->toString() << " gprvec.size(): " << gprvec.size() << std::endl;
+                        // std::cout << "i: " << i << " regContainer: " << regContainer->toString() << " gprvec.size(): " << gprvec.size() << std::endl;
                         if(i >= gprvec.size())
                         {
                             std::cerr << "regContainer: " << regContainer->toString() << std::endl;

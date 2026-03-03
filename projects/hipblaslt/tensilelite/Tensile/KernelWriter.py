@@ -518,7 +518,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.db["AssertNoEdge"] = 0 # Add assert in edge store code so crashes if executed
 
     # print vgpr register pool checkins and checkouts
-    self.db["PrintRP"] = True
+    self.db["PrintRP"] = False
     self.db["AssertOnSgprOverflow"] = False
     self.db["PrintStoreRegisterDb"] = False
 
