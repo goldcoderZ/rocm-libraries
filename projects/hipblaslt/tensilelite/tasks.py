@@ -55,6 +55,7 @@ def build_client(c, clean=False, configure=True, build=True, build_dir="build_tm
     if configure:
         os.makedirs(build_dir, exist_ok=True)
 
+        import shlex
         cmake_cmd = [
             "cmake",
             "--preset",
@@ -64,9 +65,10 @@ def build_client(c, clean=False, configure=True, build=True, build_dir="build_tm
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DGPU_TARGETS={gpu_targets}",
             f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={enable_rocprof}",
+            "-DCMAKE_CXX_FLAGS=-march=native",
         ]
 
-        c.run(" ".join(cmake_cmd))
+        c.run(shlex.join(cmake_cmd))
 
     if build:
         c.run(f"cmake --build {build_dir} --parallel")
