@@ -490,7 +490,7 @@ def Tensile(userArgs):
     print1("#  Tensile v%s" % (__version__))
     # region dbpy_attach
     # import debugpy
-    # (debugpy.listen(("0.0.0.0", 5679)), debugpy.wait_for_client()) if not debugpy.is_client_connected() else None
+    # (debugpy.listen(("0.0.0.0", 5678)), debugpy.wait_for_client()) if not debugpy.is_client_connected() else None
     # endregion
 
     argParser = argparse.ArgumentParser()
