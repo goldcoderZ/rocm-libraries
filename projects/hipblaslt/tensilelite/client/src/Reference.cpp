@@ -2488,12 +2488,9 @@ namespace TensileLite
                 isDenseEnoughForFastPath = false;
             }
 
-            if(tryFastPath && isDenseEnoughForFastPath)
+            if(tryFastPath && isDenseEnoughForFastPath && solveCPUFastInF32(problem, inputs))
             {
-                if(solveCPUFastInF32(problem, inputs))
-                {
-                    return;
-                }
+                return;
             }
 
             {
