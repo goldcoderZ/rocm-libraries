@@ -1645,7 +1645,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.states.scheduledGRInstCounts += countGlobalRead(loadModule)
         # schedule remaining globalReadIncInst
         if (i == numMfmaPerIter - 1 and globalReadCode.itemsSize()) or \
-           (i == 0 and globalReadCode.itemsSize() and (iteration == 1 and kernel["ForceUnrollSubIter"])):
+           (i == 0 and globalReadCode.itemsSize() and (iteration == 1 and kernel["ForceUnrollSubIter"]) and \
+             (kernel["ProblemType"]["Sparse"] == 0 or (kernel["ProblemType"]["Sparse"] and \
+             ((mfmaIndex == numMfmaPerIter * (iteration + 1) - 1) or mfmaIndex == self.states.grEndMfmaIndex)))):
           loadModules = globalReadCode.popFirstNItems(globalReadCode.itemsSize())
           iterCode.addItems(loadModules)
 
