@@ -6,7 +6,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async.hpp"
 #include "ck_tile/ops/gemm_mx/kernel/gemm_mx_kernel.hpp"
-#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_pipeline_agmem_bgmem_creg_v1.hpp"
+#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_wp_pipeline_agmem_bgmem_creg_v1.hpp"
 #include "test_mx_gemm_config.hpp"
 
 template <typename GemmConfig,
@@ -20,9 +20,7 @@ template <typename GemmConfig,
           typename ScaleM,
           typename ScaleN,
           bool persistent,
-          bool Splitk,
-          bool HasHotLoop_             = true,
-          ck_tile::TailNumber TailNum_ = ck_tile::TailNumber::Even>
+          bool Splitk>
 float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::stream_config& s)
 {
     using GemmShape = ck_tile::TileGemmShape<
@@ -44,15 +42,11 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                                           GemmConfig::NumWaveGroups,
                                                           GemmConfig::Preshuffle>;
 
-    // Non-preshuffle
-    using MXPipelineProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                                    BDataType,
-                                                                    AccDataType,
-                                                                    GemmShape,
-                                                                    MXGemmTraits,
-                                                                    GemmConfig::Scheduler>;
-    // Preshuffle
-    using MXPipelinePreshuffleProblem =
+    using ComputeDataType = ADataType;
+    static_assert(sizeof(ComputeDataType) >= sizeof(BDataType),
+                  "mixed_prec_gemm requires ADataType is a wider type than BDataType");
+
+    using MXPipelineProblem =
         ck_tile::MXGemmPipelineProblem<ADataType,
                                        BDataType,
                                        AccDataType,
@@ -61,18 +55,20 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                        GemmConfig::Scheduler,
                                        ck_tile::element_wise::PassThrough,
                                        ck_tile::element_wise::PassThrough,
-                                       HasHotLoop_,
-                                       TailNum_>;
+                                       true,
+                                       ck_tile::TailNumber::Full,
+                                       ck_tile::amd_buffer_coherence_enum::coherence_default,
+                                       false,
+                                       ADataType,
+                                       false,
+                                       1,
+                                       1,
+                                       GemmConfig::TiledMMAPermuteN>;
 
-    // Choose pipeline problem based on preshuffle availability
-    using MXSelectPipelineProblem =
-        std::conditional_t<GemmConfig::Preshuffle, MXPipelinePreshuffleProblem, MXPipelineProblem>;
-
-    // Choose pipeline: Preshuffle or comp async
     using MXGemmPipeline =
         std::conditional_t<GemmConfig::Preshuffle,
-                           ck_tile::MXGemmPipelineAGmemBGmemCRegV1<MXSelectPipelineProblem>,
-                           ck_tile::MXGemmPipelineAgBgCrCompAsync<MXSelectPipelineProblem>>;
+                           ck_tile::MXGemmPreshufflePipelineAGmemBGmemCRegV1<MXPipelineProblem>,
+                           ck_tile::MXGemmPipelineAgBgCrCompAsync<MXPipelineProblem>>;
 
     using TilePartitioner =
         ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
@@ -80,8 +76,8 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                                    GemmConfig::TileParitionerM01>;
 
     using GemmEpilogueProblem =
-        ck_tile::CShuffleEpilogueProblem<ADataType,
-                                         BDataType,
+        ck_tile::CShuffleEpilogueProblem<ComputeDataType,
+                                         ComputeDataType,
                                          ck_tile::tuple<>,
                                          AccDataType,
                                          CDataType,
@@ -95,37 +91,14 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                          GemmConfig::M_Warp_Tile,
                                          GemmConfig::N_Warp_Tile,
                                          GemmConfig::K_Warp_Tile,
-                                         MXSelectPipelineProblem::TransposeC>;
-
-    static constexpr ck_tile::index_t BlockedXDLN_PerWarp = 2;
-    using PreshuffleEpilogueProblem =
-        ck_tile::CShuffleEpilogueProblem<ADataType,
-                                         BDataType,
-                                         ck_tile::tuple<>,
-                                         AccDataType,
-                                         CDataType,
-                                         ck_tile::tuple<>,
-                                         CLayout,
-                                         ck_tile::element_wise::PassThrough,
-                                         TilePartitioner::MPerBlock,
-                                         TilePartitioner::NPerBlock,
-                                         GemmConfig::M_Warp,
-                                         GemmConfig::N_Warp,
-                                         GemmConfig::M_Warp_Tile,
-                                         GemmConfig::N_Warp_Tile,
-                                         GemmConfig::K_Warp_Tile,
-                                         MXSelectPipelineProblem::TransposeC,
+                                         MXPipelineProblem::TransposeC,
                                          GemmConfig::NumWaveGroups,
                                          false,
                                          1,
                                          GemmConfig::TiledMMAPermuteN,
-                                         BlockedXDLN_PerWarp>;
+                                         ck_tile::MXEpilogueTraits<GemmConfig>::BlockedXDLNPerWarp>;
 
-    // Select epilogue problem based on preshuffle availability
-    using SelectEpilogueProblem =
-        std::conditional_t<GemmConfig::Preshuffle, PreshuffleEpilogueProblem, GemmEpilogueProblem>;
-
-    using GemmEpilogue = ck_tile::CShuffleEpilogue<SelectEpilogueProblem>;
+    using GemmEpilogue = ck_tile::CShuffleEpilogue<GemmEpilogueProblem>;
 
     using Kernel = ck_tile::MXGemmKernel<TilePartitioner, MXGemmPipeline, GemmEpilogue>;
 

@@ -82,6 +82,13 @@ struct MxGemmConfig
 
 struct MXfp4_GemmConfig16 : MxGemmConfig
 {
+    static constexpr ck_tile::index_t M_Tile = 64;
+    static constexpr ck_tile::index_t N_Tile = 64;
+    static constexpr ck_tile::index_t K_Tile = 256;
+};
+
+struct MXfp4_GemmConfig16_Preshuffle : MXfp4_GemmConfig16
+{
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 512;
     static constexpr ck_tile::index_t K_Tile = 256;
