@@ -32,6 +32,7 @@ from Tensile.Common import printExit, printWarning, print2, \
 from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
+from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import NamedTuple, List, Dict
@@ -314,6 +315,7 @@ class LibraryLogic(NamedTuple):
     solutions: list
     exactLogic: list
     library: SolutionLibrary.MasterSolutionLibrary
+    typeMismatches: dict = {}
 
 def parseLibraryLogicFile(
         filename,
@@ -424,7 +426,9 @@ def parseLibraryLogicData(
                          )
         return solutionObject
 
+    resetTypeMismatchCollector()
     solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(
         data,
@@ -439,7 +443,7 @@ def parseLibraryLogicData(
     )
 
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \
-            data.get("ExactLogic"), newLibrary)
+            data.get("ExactLogic"), newLibrary, typeMismatches)
 
 
 def parseLibraryLogicList(data, srcFile="?"):
