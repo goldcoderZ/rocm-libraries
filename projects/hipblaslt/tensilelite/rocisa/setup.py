@@ -43,6 +43,16 @@ class CMakeBuild(build_ext):
             build_module = glob.glob(os.path.join(self.build_temp, 'tensilelite', 'rocisa', "lib", f"rocisa*{ext_suffix}"))[0]
             target_module = os.path.join(self.build_lib, os.path.basename(build_module))
             shutil.copy2(build_module, target_module)
+            # Also copy to source dir so editable installs can find it
+            source_root = os.path.abspath(os.path.dirname(__file__))
+            inplace_module = os.path.join(source_root, os.path.basename(build_module))
+            shutil.copy2(build_module, inplace_module)
+            # Also copy into the venv site-packages for immediate availability
+            site_pkg = os.path.join(os.path.dirname(os.path.dirname(sys.executable)), 'lib',
+                                    f'python{sys.version_info.major}.{sys.version_info.minor}',
+                                    'site-packages')
+            if os.path.isdir(site_pkg):
+                shutil.copy2(build_module, os.path.join(site_pkg, os.path.basename(build_module)))
         except subprocess.CalledProcessError as e:
             print(f"An error occurred while building with CMake: {e}")
             assert 0

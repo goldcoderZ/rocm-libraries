@@ -1,0 +1,11 @@
+[project]
+name = "rocisa"
+dynamic = ["version", "description", "readme", "authors", "classifiers", "dependencies"]
+requires-python = ">=3.13"
+
+[tool.setuptools]
+packages = []
+
+[build-system]
+requires = ["setuptools", "nanobind", "cmake"]
+build-backend = "setuptools.build_meta"

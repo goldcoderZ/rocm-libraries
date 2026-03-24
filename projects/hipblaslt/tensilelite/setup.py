@@ -28,6 +28,7 @@
 # - creates executables for running benchmarking
 # - installs TensileConfig.cmake so one call find_package(Tensile)
 ################################################################################
+import re
 from pathlib import Path
 from setuptools import setup
 
@@ -37,8 +38,9 @@ def read_requirements_from_txt():
     return [line for line in file.read().splitlines() if not line.strip().startswith("#")]
 
 def read_version_from_init():
-    import Tensile
-    return Tensile.__version__
+    init_file = Path(__file__).parent / "Tensile" / "__init__.py"
+    match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', init_file.read_text())
+    return match.group(1) if match else "0.0.0"
 
 setup(
   name="Tensile",
