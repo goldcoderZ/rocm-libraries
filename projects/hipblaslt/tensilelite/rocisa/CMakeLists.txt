@@ -1,26 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Support standalone builds (e.g. pip install / tox)
+# Support both standalone (scikit-build-core / tox) and subdirectory
+# (hipblaslt CMake) builds.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    cmake_minimum_required(VERSION 3.21)
+    cmake_minimum_required(VERSION 3.25)
     project(rocisa LANGUAGES CXX)
     set(ROCISA_STANDALONE ON)
-    set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON)
-
-    # nanobind requires the Python::Module target (FindPython, not FindPython3)
-    find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
-
-    # Find HIP (needed by nanobind target and origami)
-    find_package(hip REQUIRED)
-
-    # origami: prefer a sibling monorepo checkout, fall back to find_package
-    set(_origami_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/origami")
-    if(EXISTS "${_origami_sibling}/CMakeLists.txt")
-        add_subdirectory("${_origami_sibling}" "${CMAKE_CURRENT_BINARY_DIR}/origami")
-    else()
-        find_package(origami REQUIRED)
-    endif()
 else()
     set(ROCISA_STANDALONE OFF)
 endif()
@@ -40,7 +26,9 @@ target_include_directories(rocisa-cpp
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
-if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
+# Build the Python extension when bundling deps (hipblaslt subdir build)
+# or when building standalone.
+if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     include(FetchContent)
     FetchContent_Declare(
       nanobind
@@ -48,6 +36,16 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
       GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
     )
     FetchContent_MakeAvailable(nanobind)
+
+    # Locate origami: prefer the monorepo sibling, fall back to installed package.
+    if(NOT TARGET roc::origami)
+        set(_origami_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/origami")
+        if(IS_DIRECTORY "${_origami_sibling}")
+            add_subdirectory("${_origami_sibling}" origami EXCLUDE_FROM_ALL)
+        else()
+            find_package(origami REQUIRED)
+        endif()
+    endif()
 
     set(ROCISAINST_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruction.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/common.cpp"
@@ -85,7 +83,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
                             ${ROCISAFUNC_SOURCE})
     target_include_directories(_rocisa PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/origami/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/origami/include"
     )
     target_link_libraries(_rocisa PUBLIC roc::origami)
     target_link_libraries(_rocisa PRIVATE hip::host)
@@ -95,4 +93,11 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
         "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
         COPYONLY
     )
+
+    if(ROCISA_STANDALONE)
+        # Install rules for scikit-build-core: place _rocisa.so and
+        # __init__.py into the rocisa/ package directory in the wheel.
+        install(TARGETS _rocisa DESTINATION rocisa)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/__init__.py" DESTINATION rocisa)
+    endif()
 endif()
