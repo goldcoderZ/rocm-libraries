@@ -8,9 +8,6 @@
 
 namespace ck_tile {
 
-// A is block distributed tensor
-// B is block distributed tensor
-// C is block distributed tensor
 template <typename Problem_,
           typename Policy_ = BlockGemmARegBRegCRegV1DefaultPolicy,
           bool TransposeC_ = false>
@@ -249,11 +246,6 @@ struct BlockGemmARegBRegCRegV1
         });
     }
 
-    // C += A * B with MX scaling and packed-in-two (XdlPack) optimization
-    // Scale tensors contain pre-packed int32_t: each int32_t holds MXdlPack * KXdlPack e8m0_t
-    // values (for A) or NXdlPack * KXdlPack (for B), packed on the host.
-    // Uses OpSel (0-3) to select which byte within the packed int32_t for each MFMA call.
-    // XdlPack template parameters default to 2; fall back to 1 when iteration count is too small.
     template <typename CBlockTensor,
               typename ABlockTensor,
               typename BBlockTensor,
@@ -309,7 +301,7 @@ struct BlockGemmARegBRegCRegV1
         constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
-        // Effective XdlPack: fall back to 1 when iteration count is insufficient
+        // Effective XdlPack
         constexpr index_t MXdlPack =
             (MIterPerWarp >= MXdlPack_ && MIterPerWarp % MXdlPack_ == 0) ? MXdlPack_ : 1;
         constexpr index_t NXdlPack =
@@ -321,15 +313,13 @@ struct BlockGemmARegBRegCRegV1
         constexpr index_t NPackIterPerWarp = NIterPerWarp / NXdlPack;
         constexpr index_t KPackIterPerWarp = KIterPerWarp / KXdlPack;
 
-        // hot loop with MX scaling and pre-packed int32_t scales:
-        // Outer loops iterate over pack groups (scale tile indices)
-        static_ford<sequence<KPackIterPerWarp, MPackIterPerWarp>>{}([&](auto ii) {
-            constexpr auto ikpack = number<ii[number<0>{}]>{};
-            constexpr auto impack = number<ii[number<1>{}]>{};
-            // Get pre-packed int32_t A scale (already contains MXdlPack*KXdlPack e8m0_t)
-            auto scale_a_slice = scale_a_tensor.get_y_sliced_thread_data(
-                sequence<ikpack, impack, 0>{}, sequence<1, 1, 1>{});
-            const int32_t a_scale_packed = bit_cast<int32_t>(scale_a_slice[number<0>{}]);
+        // hot loop
+        static_for<0, KPackIterPerWarp, 1>{}([&](auto ikpack) {
+            static_for<0, MPackIterPerWarp, 1>{}([&](auto impack) {
+                // Get pre-packed int32_t A scale (already contains MXdlPack*KXdlPack e8m0_t)
+                auto scale_a_slice = scale_a_tensor.get_y_sliced_thread_data(
+                    sequence<ikpack, impack, 0>{}, sequence<1, 1, 1>{});
+                const int32_t a_scale_packed = bit_cast<int32_t>(scale_a_slice[number<0>{}]);
 
             static_for<0, NPackIterPerWarp, 1>{}([&](auto inpack) {
                 // Get pre-packed int32_t B scale
@@ -337,12 +327,11 @@ struct BlockGemmARegBRegCRegV1
                     sequence<ikpack, inpack, 0>{}, sequence<1, 1, 1>{});
                 const int32_t b_scale_packed = bit_cast<int32_t>(scale_b_slice[number<0>{}]);
 
-                // Inner loops: issue MFMAs within the pack group using OpSel
-                static_ford<sequence<KXdlPack, MXdlPack>>{}([&](auto jj) {
-                    constexpr auto ikxdl = number<jj[number<0>{}]>{};
-                    constexpr auto imxdl = number<jj[number<1>{}]>{};
-                    constexpr auto kIter = ikpack * KXdlPack + ikxdl;
-                    constexpr auto mIter = impack * MXdlPack + imxdl;
+                    // Inner loops
+                    static_for<0, KXdlPack, 1>{}([&](auto ikxdl) {
+                        static_for<0, MXdlPack, 1>{}([&](auto imxdl) {
+                            constexpr auto kIter = ikpack * KXdlPack + ikxdl;
+                            constexpr auto mIter = impack * MXdlPack + imxdl;
 
                     // read A warp tensor from A block tensor
                     AWarpTensor a_warp_tensor;
@@ -374,12 +363,11 @@ struct BlockGemmARegBRegCRegV1
                             merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                        // warp GEMM with MX scaling using pre-packed scale and OpSel
-                        WarpGemm{}.template operator()<kOpSelA, kOpSelB>(c_warp_tensor,
-                                                                         a_warp_tensor,
-                                                                         b_warp_tensor,
-                                                                         a_scale_packed,
-                                                                         b_scale_packed);
+                                WarpGemm{}.template operator()<kOpSelA, kOpSelB>(c_warp_tensor,
+                                                                                 a_warp_tensor,
+                                                                                 b_warp_tensor,
+                                                                                 a_scale_packed,
+                                                                                 b_scale_packed);
 
                         // write C warp tensor into C block tensor
                         c_block_tensor.set_y_sliced_thread_data(
