@@ -28,6 +28,7 @@ add_executable(
     engines/plans/RMSnorm/TestRMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/TestRMSnormFwdPlan.cpp
     hip/TestHipProgramAndKernel.cpp
+    hip/TestHipKernelCompileOptions.cpp
 )
 
 target_compile_options(hip_kernel_provider_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
