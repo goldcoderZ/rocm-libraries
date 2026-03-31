@@ -306,11 +306,13 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             const auto scale_k_packed = kargs.K / BlockScaleSize / KXdlPackEff;
             const auto scale_m_packed = kargs.M / MXdlPackEff;
 
+            // A scale tensor view - layout [M/MXdlPackEff, K/32/KXdlPackEff] with int32_t elements
             const auto scale_a_tensor_view = make_naive_tensor_view<address_space_enum::global>(
                 reinterpret_cast<const int32_t*>(scale_a.ptr),
                 make_tuple(scale_m_packed, scale_k_packed),
                 make_tuple(scale_k_packed, 1));
 
+            // Tile window shape: [MPerBlock/MXdlPackEff, KPerBlock/32/KXdlPackEff]
             return make_tile_window(
                 scale_a_tensor_view,
                 make_tuple(number<TilePartitioner::MPerBlock / MXdlPackEff>{},

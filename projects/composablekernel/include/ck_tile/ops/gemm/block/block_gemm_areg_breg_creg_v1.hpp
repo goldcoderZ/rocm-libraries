@@ -320,7 +320,8 @@ struct BlockGemmARegBRegCRegV1
         constexpr index_t NPackIterPerWarp = NIterPerWarp / NXdlPack;
         constexpr index_t KPackIterPerWarp = KIterPerWarp / KXdlPack;
 
-        // hot loop
+        // hot loop with MX scaling and pre-packed int32_t scales:
+        // Outer loops iterate over pack groups (scale tile indices)
         static_for<0, KPackIterPerWarp, 1>{}([&](auto ikpack) {
             static_for<0, MPackIterPerWarp, 1>{}([&](auto impack) {
                 // Get pre-packed int32_t A scale (already contains MXdlPack*KXdlPack e8m0_t)
@@ -334,7 +335,7 @@ struct BlockGemmARegBRegCRegV1
                     sequence<ikpack, inpack, 0>{}, sequence<1, 1, 1>{});
                 const int32_t b_scale_packed = bit_cast<int32_t>(scale_b_slice[number<0>{}]);
 
-                    // Inner loops
+                    // Inner loops: issue MFMAs within the pack group using OpSel
                     static_for<0, KXdlPack, 1>{}([&](auto ikxdl) {
                         static_for<0, MXdlPack, 1>{}([&](auto imxdl) {
                             constexpr auto kIter = ikpack * KXdlPack + ikxdl;
@@ -370,6 +371,7 @@ struct BlockGemmARegBRegCRegV1
                             merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
+                                // warp GEMM with MX scaling using pre-packed scale and OpSel
                                 WarpGemm{}.template operator()<kOpSelA, kOpSelB>(c_warp_tensor,
                                                                                  a_warp_tensor,
                                                                                  b_warp_tensor,

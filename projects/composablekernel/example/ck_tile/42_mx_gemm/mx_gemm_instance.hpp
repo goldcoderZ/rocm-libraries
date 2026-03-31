@@ -69,6 +69,8 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                        1,
                                        GemmConfig::TiledMMAPermuteN>;
 
+    // Use the MX GEMM Preshuffle pipeline or
+    // the new MX comp_async pipeline with MX scaling support
     using MXGemmPipeline =
         std::conditional_t<GemmConfig::Preshuffle,
                            ck_tile::MXGemmPreshufflePipelineAGmemBGmemCRegV1<MXPipelineProblem>,
