@@ -46,7 +46,7 @@ TYPED_TEST_SUITE(TestMxGemmFp4Preshuffle, MxFp4PreshuffleTypes);
 
 TYPED_TEST(TestMxGemmFp4Preshuffle, BasicSizes)
 {
-    this->Run(128, 512, 128);
     this->Run(128, 512, 256);
-    this->Run(256, 512, 512);
+    this->Run(256, 512, 256);
+    this->Run(256, 1024, 512);
 }
