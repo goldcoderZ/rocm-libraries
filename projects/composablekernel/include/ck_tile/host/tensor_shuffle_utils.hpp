@@ -6,6 +6,20 @@
 #include <stdexcept>
 
 namespace ck_tile {
+namespace detail {
+template <typename GemmConfig, typename = void>
+struct shuffle_b_uses_packed_size : std::false_type
+{
+};
+
+template <typename GemmConfig>
+struct shuffle_b_uses_packed_size<GemmConfig,
+                                  std::void_t<decltype(GemmConfig::UsePackedSizeInShuffleB)>>
+    : std::bool_constant<GemmConfig::UsePackedSizeInShuffleB>
+{
+};
+} // namespace detail
+
 template <typename T>
 auto shuffle_aq(const ck_tile::HostTensor<T>* t, int block_aq_k)
 {
@@ -102,8 +116,11 @@ auto shuffle_b(const ck_tile::HostTensor<T>& t, GemmConfig)
     }
     else
     {
-        constexpr int KLane      = ck_tile::get_warp_size() / GemmConfig::N_Warp_Tile;
-        constexpr int PackedSize = ck_tile::numeric_traits<ck_tile::remove_cvref_t<T>>::PackedSize;
+        constexpr int KLane = ck_tile::get_warp_size() / GemmConfig::N_Warp_Tile;
+        constexpr int PackedSize =
+            detail::shuffle_b_uses_packed_size<GemmConfig>::value
+                ? ck_tile::numeric_traits<ck_tile::remove_cvref_t<T>>::PackedSize
+                : 1;
         constexpr int ItemsPerAccess = std::min(16 * PackedSize / static_cast<int>(sizeof(T)),
                                                 GemmConfig::K_Warp_Tile / KLane);
 
@@ -165,8 +182,11 @@ auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmC
     }
     else
     {
-        constexpr int KLane      = ck_tile::get_warp_size() / GemmConfig::N_Warp_Tile;
-        constexpr int PackedSize = ck_tile::numeric_traits<ck_tile::remove_cvref_t<T>>::PackedSize;
+        constexpr int KLane = ck_tile::get_warp_size() / GemmConfig::N_Warp_Tile;
+        constexpr int PackedSize =
+            detail::shuffle_b_uses_packed_size<GemmConfig>::value
+                ? ck_tile::numeric_traits<ck_tile::remove_cvref_t<T>>::PackedSize
+                : 1;
         constexpr int ItemsPerAccess = std::min(16 * PackedSize / static_cast<int>(sizeof(T)),
                                                 GemmConfig::K_Warp_Tile / KLane);
         ck_tile::HostTensor<T> t_view({n_ / gemmConfig.N_Tile,
