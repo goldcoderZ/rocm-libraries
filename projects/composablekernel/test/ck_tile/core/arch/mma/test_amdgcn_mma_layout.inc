@@ -22,6 +22,8 @@ using namespace ck_tile;
 using namespace ck_tile::core::arch;
 using namespace mma;
 
+using I4        = pk_int4_t;
+using I32       = int32_t;
 using F16       = fp16_t;
 using F32       = fp32_t;
 using Target908 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
@@ -48,6 +50,56 @@ using Target12  = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>()
 // of the MMA fragment registers, executes the intrinsic, then uses TileDistrEncRegMap again to
 // gather back into C matrix. The position of "1" in C is checked against the expected (m, n)
 // location.
+
+// Helper function to place a single "1" value in any datatype. For packed types, "off"
+// indicates the offset at which the "1" must be placed within the pack. The packed datatypes
+// don't always have utilities to convert "1" to their type so we use raw bits instead.
+template <typename T>
+CK_TILE_DEVICE T packed_one(int off = 0)
+{
+    static_assert(numeric_traits<T>::PackedSize == 1, "You need a new packed_one() overload.");
+    if(off != 0)
+    {
+        printf("\033[31mBad pack offset %d for non-packed type, returning 0!\n\033[0m", off);
+        return type_convert<T>(0.0f);
+    }
+    return type_convert<T>(1.0f);
+}
+
+template <>
+CK_TILE_DEVICE pk_int4_t packed_one(int off)
+{
+    if(off >= 2)
+    {
+        printf("\033[31mBad pack offset %d for pk_int4_t, returning 0!\n\033[0m", off);
+        return {};
+    }
+    return pk_int4_t(off == 0 ? 0b00000001 : 0b00010000); // pk_int4_t has no type convert...
+}
+
+template <>
+CK_TILE_DEVICE pk_fp4_t packed_one(int off)
+{
+    if(off >= 2)
+    {
+        printf("\033[31mBad pack offset %d for pk_fp4_t, returning 0!\n\033[0m", off);
+        return {};
+    }
+    return type_convert<pk_fp4_t>(off == 0 ? fp32x2_t{1.0f, 0.0f} : fp32x2_t{0.0f, 1.0f});
+}
+
+template <>
+CK_TILE_DEVICE pk_fp6x16_t packed_one(int off)
+{
+    if(off >= 16)
+    {
+        printf("\033[31mBad pack offset %d for pk_fp6x16_t, returning 0!\n\033[0m", off);
+        return pk_fp6x16_t{0};
+    }
+    pk_fp6x16_t r(0);
+    r.pack(0b001000, off); // pk_fp6x16_t has no type convert...
+    return r;
+}
 
 /**
  * @class MmaLayoutTestKernel
@@ -91,13 +143,21 @@ struct MmaLayoutTestKernel
             // place a single "1" in A/B fragments using (lane, vecIdx) -> (row, col) mapping
             for(index_t v = 0; v < a_vec_size; ++v)
             {
-                auto a_coords = ARegMap::calc_matrix_indices_from_lane_vector(lane, v);
+                // In case of packed data types or sparse intrinsics, the calculated matrix indices
+                // are in terms of the matrix of packed (or compressed) elements. We check if the
+                // compressed element corresponds with our targeted value element, and calculate the
+                // offset (remainder) within our packed element to get to the value element.
+                auto a_coords         = ARegMap::calc_matrix_indices_from_lane_vector(lane, v);
+                index_t k_target      = k / (MmaOp::kCompressionRatio * MmaOp::APackedSize);
+                index_t k_rem         = k % (MmaOp::APackedSize);
+                uint32_t k_rem_sparse = k % (MmaOp::kCompressionRatio);
 
-                // When dealing with sparse intrinsics, the A matrix is compressed in the K
-                // direction and we just put our "1" in the k / 2 position (rounded down).
-                if(a_coords[0] == m && a_coords[1] == (k / MmaOp::kCompressionRatio))
+                // TODO: Sparse + Compression requires some extra thought...
+                static_assert(MmaOp::kCompressionRatio == 1 || MmaOp::APackedSize == 1);
+
+                if(a_coords[0] == m && a_coords[1] == k_target)
                 {
-                    a_frag[v] = 1;
+                    a_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem);
 
                     // Calc an appropriate sparse idx value for a single 1 in position k. We use a
                     // baseline index of 0x88888888. This sends each compressed index i to
@@ -105,16 +165,20 @@ struct MmaLayoutTestKernel
                     // instead. We update only the absolutely necessary pair of bits for this
                     // (idx[v*2:v*2+1]). Note that this simple calculation works for any 4:2 sparse
                     // intrinsic with up to 16 packed k elements per lane.
-                    sparse_idx = 0x88888888 | ((k % 2) << (v * 2));
+                    sparse_idx = 0x88888888 | (k_rem_sparse << (v * 2));
                 }
             }
 
             for(index_t v = 0; v < b_vec_size; ++v)
             {
-                auto b_coords = BRegMap::calc_matrix_indices_from_lane_vector(lane, v);
-                if(b_coords[0] == n && b_coords[1] == k)
+                // Same considerations as for A (but not compression), see comment above.
+                auto b_coords    = BRegMap::calc_matrix_indices_from_lane_vector(lane, v);
+                index_t k_target = k / (MmaOp::BPackedSize);
+                index_t k_rem    = k % (MmaOp::BPackedSize);
+
+                if(b_coords[0] == n && b_coords[1] == k_target)
                 {
-                    b_frag[v] = 1;
+                    b_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem);
                 }
             }
 
@@ -137,7 +201,7 @@ struct MmaLayoutTestKernel
                 auto c_coords = CRegMap::calc_matrix_indices_from_lane_vector(lane, v);
 
                 const float expected = (c_coords[0] == m && c_coords[1] == n) ? 1 : 0;
-                const float value    = static_cast<float>(c_frag[v]);
+                const float value    = type_convert<float>(c_frag[v]);
                 if(std::fabs(value - expected) > tolerance)
                 {
                     err = 1;
@@ -228,6 +292,7 @@ using Gfx11Intrinsics = ::testing::Types<
 >;
 using Gfx12Intrinsics = ::testing::Types<
     amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32_gfx12
+    amdgcn_mma<I4,  I4,  I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<I4, I4, I32>,   Target12,  MmaOpFamily::DENSE>, // wmma_i32_16x16x16_iu4_w32_gfx12
     amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,          Target12,  MmaOpFamily::SPARSE> // swmmac_f32_16x16x32_f16_w32
 >;
 // clang-format on
