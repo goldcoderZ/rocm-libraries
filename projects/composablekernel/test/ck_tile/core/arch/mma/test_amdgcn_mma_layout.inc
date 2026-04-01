@@ -288,11 +288,13 @@ using Gfx950Intrinsics = ::testing::Types<
     amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultMfmaCtrlFlags,                Target950, MmaOpFamily::DENSE>  // mfma_f32_16x16x32_f16
 >;
 using Gfx11Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target11,  MmaOpFamily::DENSE>  // wmma_f32_16x16x16_f16_w32
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target11,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32
+    amdgcn_mma<I4,  I4,  I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<I4, I4, I32>,   Target11,  MmaOpFamily::DENSE>  // wmma_i32_16x16x16_iu4_w32
 >;
 using Gfx12Intrinsics = ::testing::Types<
     amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32_gfx12
     amdgcn_mma<I4,  I4,  I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<I4, I4, I32>,   Target12,  MmaOpFamily::DENSE>, // wmma_i32_16x16x16_iu4_w32_gfx12
+    amdgcn_mma<I4,  I4,  I32, 16u, 16u, 32u, DefaultWmmaCtrlFlags<I4, I4, I32>,   Target12,  MmaOpFamily::DENSE>, // wmma_i32_16x16x32_iu4_w32_gfx12
     amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,          Target12,  MmaOpFamily::SPARSE> // swmmac_f32_16x16x32_f16_w32
 >;
 // clang-format on
