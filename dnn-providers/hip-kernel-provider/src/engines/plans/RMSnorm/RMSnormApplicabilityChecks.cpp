@@ -236,18 +236,19 @@ void checkTensorDataTypesSupported(
         hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
         hipdnn_data_sdk::data_objects::DataType::HALF};
 
-    validateConsistentDataTypes(ioTensorIds,
-                                tensorMap,
-                                allowedIOTypes,
-                                "RMSnorm implementation supports only FLOAT, HALF, and BFLOAT16 "
-                                "data types for x & y tensors.",
-                                "All IO tensors for RMSnorm must have the same data type.");
+    for(const auto ioTensorId : ioTensorIds)
+    {
+        const auto& tensorAttr = hip_kernel_utils::findTensorAttributes(tensorMap, ioTensorId);
+        validateDataTypeIsSupported(tensorAttr.data_type(),
+                                    allowedIOTypes,
+                                    "RMSnorm implementation supports only FLOAT, HALF, and "
+                                    "BFLOAT16 data types for x and y tensors.");
+    }
 
-    // Only fp32 compute type is supported for now
     std::unordered_set<hipdnn_data_sdk::data_objects::DataType> allowedComputeTypes{
-        hipdnn_data_sdk::data_objects::DataType::FLOAT
-
-    };
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_data_sdk::data_objects::DataType::HALF};
     validateConsistentDataTypes(affineTensorIds,
                                 tensorMap,
                                 allowedComputeTypes,

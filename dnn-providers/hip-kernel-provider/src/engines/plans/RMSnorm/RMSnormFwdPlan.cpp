@@ -121,11 +121,19 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     // Determine input/output data type configuration
-    auto ioDataType = _params.x()->data_type();
-    const bool useFp16 = ioDataType == hipdnn_data_sdk::data_objects::DataType::HALF;
-    const bool useBfp16 = ioDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16;
+    const auto inputDataType = _params.x()->data_type();
+    const auto outputDataType = _params.y()->data_type();
+    const auto scaleDataType = _params.scale()->data_type(); // applies to both scale and bias
+    const auto computeDataType = (_params.invRMS() == nullptr)
+                                     ? hipdnn_data_sdk::data_objects::DataType::FLOAT
+                                     : _params.invRMS()->data_type();
+    const bool useFp16 = inputDataType == hipdnn_data_sdk::data_objects::DataType::HALF;
+    const bool useBfp16 = inputDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16;
     const bool useFp32 = !useFp16 && !useBfp16;
-    std::string ioTypeString = getKernelParamTypeString(ioDataType);
+    const std::string inputTypeString = getKernelParamTypeString(inputDataType);
+    const std::string outputTypeString = getKernelParamTypeString(outputDataType);
+    const std::string scaleTypeString = getKernelParamTypeString(scaleDataType);
+    const std::string computeTypeString = getKernelParamTypeString(computeDataType);
 
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16 ? "1" : "0"));
@@ -133,7 +141,10 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     options.emplace_back("-DHIP_PLUGIN_USE_RNE_BFLOAT16=1");
     options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_C_STRIDE=") + std::to_string(cStride));
     options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_C_SIZE=") + std::to_string(cSize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_IO_TYPE=") + ioTypeString);
+    options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=") + inputTypeString);
+    options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=") + outputTypeString);
+    options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=") + scaleTypeString);
+    options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=") + computeTypeString);
     options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_LOCAL_SIZE=")
                          + std::to_string(xlocalsize));
     options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
