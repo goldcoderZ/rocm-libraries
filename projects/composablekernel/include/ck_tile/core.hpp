@@ -25,6 +25,8 @@
 #include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/arch/mma/mma_transforms.hpp"
 #include "ck_tile/core/arch/mma/mma_wavewise.hpp"
+#include "ck_tile/core/arch/mma/scale/mfma/scale_gfx9.hpp"
+#include "ck_tile/core/arch/mma/scale/scale_traits.hpp"
 #include "ck_tile/core/arch/mma/sparse/mfma/selector.hpp"
 #include "ck_tile/core/arch/mma/sparse/mfma/sparse_gfx9.hpp"
 #include "ck_tile/core/arch/mma/sparse/sparse.hpp"
