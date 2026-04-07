@@ -30,6 +30,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <vector>
 
 #include "ProgramOptions.hpp"
 
@@ -40,6 +41,13 @@ namespace TensileLite
 {
     namespace Client
     {
+        inline constexpr size_t BenchLikeHotSubIterations = 5;
+
+        inline constexpr size_t benchmarkHotSubIterations(bool useGPUTimer,
+                                                          size_t /*synchronizerBytes*/ = 0)
+        {
+            return useGPUTimer ? BenchLikeHotSubIterations : 1;
+        }
 
         class BenchmarkTimer : public RunListener
         {
@@ -116,6 +124,7 @@ namespace TensileLite
             int m_numEnqueuesInSolution = 0;
             int m_numSyncsInBenchmark   = 0;
             int m_curNumEnqueuesPerSync = 0;
+            int m_numSyncsCompleted     = 0;
 
             clock::time_point m_startTime;
             clock::time_point m_endTime;
@@ -128,8 +137,8 @@ namespace TensileLite
             using double_nanos  = std::chrono::duration<double, std::nano>;
             using prob_sol_map  = std::map<int, int>;
 
-            double_millis m_timeInSolution;
-            double_millis m_totalGPUTime;
+            double_millis m_compareTimeInSolution;
+            double_millis m_rawTimeInSolution;
             double_millis m_currentBestWarmUpTime;
             float         m_flushTimeUs;
             float         m_skip_slow_solution_ratio;

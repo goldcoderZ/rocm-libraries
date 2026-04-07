@@ -67,6 +67,7 @@ void Arguments::init()
 
     iters      = 10;
     cold_iters = 2;
+    num_benchmarks = 1;
 
     algo                   = 0;
     solution_index         = -1;

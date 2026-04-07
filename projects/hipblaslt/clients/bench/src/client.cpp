@@ -469,6 +469,10 @@ try
          value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
          "Cold Iterations to run before entering the timing loop")
 
+        ("num-benchmarks",
+         value<int32_t>(&arg.num_benchmarks)->default_value(1),
+         "Number of benchmark windows to run and aggregate")
+
         ("algo_method",
          value<std::string>(&algo_method_str)->default_value("heuristic"),
          "Use different algorithm search API. Options: heuristic, all, index.")
@@ -986,6 +990,11 @@ try
     if(arg.skip_slow_solution_ratio < 0 || arg.skip_slow_solution_ratio > 1)
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
+
+    if(arg.num_benchmarks <= 0)
+        throw std::invalid_argument("Invalid value for --num-benchmarks "
+                                    + std::to_string(arg.num_benchmarks)
+                                    + "; expected > 0");
 
     if(verify)
     {

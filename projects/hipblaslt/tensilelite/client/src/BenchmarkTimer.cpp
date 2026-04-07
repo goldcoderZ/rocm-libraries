@@ -33,9 +33,13 @@
 
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <csignal>
 #include <cstddef>
+#include <numeric>
 #include <thread>
+#include <vector>
 
 namespace TensileLite
 {
@@ -57,8 +61,8 @@ namespace TensileLite
             , m_numEnqueuesPerSolution(m_numEnqueuesPerSync * m_numSyncsPerBenchmark)
             , m_useGPUTimer(args["use-gpu-timer"].as<bool>())
             , m_sleepPercent(args["sleep-percent"].as<int>())
-            , m_timeInSolution(0)
-            , m_totalGPUTime(0)
+            , m_compareTimeInSolution(0)
+            , m_rawTimeInSolution(0)
             , m_currentBestWarmUpTime(std::numeric_limits<double>::max())
             , m_flushTimeUs(flushTimeUs)
             , m_skip_slow_solution_ratio(args["skip-slow-solution-ratio"].as<float>())
@@ -120,7 +124,9 @@ namespace TensileLite
         void BenchmarkTimer::preSolution(ContractionSolution* const solution)
         {
             m_numEnqueuesInSolution = 0;
-            m_timeInSolution        = double_millis::zero();
+            m_numSyncsCompleted     = 0;
+            m_compareTimeInSolution = double_millis::zero();
+            m_rawTimeInSolution     = double_millis::zero();
             m_skip_slow_solution    = false;
 
             ++m_currSolutionIdx; // update current sol-idx
@@ -168,7 +174,7 @@ namespace TensileLite
             {
                 ScopedTimer timer("post_solution_perf_calc");
                 bool   sol_is_skipped    = (m_skiprun_from_map || m_skip_slow_solution);
-                timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
+                timePerEnqueue_us = !sol_is_skipped ? double_micros(m_compareTimeInSolution).count()
                                                                      / m_numEnqueuesInSolution
                                                                  - m_flushTimeUs
                                                            : std::numeric_limits<double>::quiet_NaN();
@@ -204,7 +210,8 @@ namespace TensileLite
                 m_reporter->report(ResultKey::SpeedGFlops, gflops);
             }
 
-            m_timeInSolution        = double_millis::zero();
+            m_compareTimeInSolution = double_millis::zero();
+            m_rawTimeInSolution     = double_millis::zero();
             m_numEnqueuesInSolution = 0;
         }
 
@@ -244,18 +251,11 @@ namespace TensileLite
                 return;
 
             double_millis totalTime(0.0);
-
-            // Skip the first warmup event (cold start) when multiple warmups are available
-            size_t warmupStartIdx = startEvents->size() == 1 ? 0 : 1;
-            float enqTime = 0.0f;
+            float         eventMs = 0.0f;
             HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-            for(size_t i = warmupStartIdx; i < startEvents->size(); i++)
-            {
-                HIP_CHECK_EXC(hipEventElapsedTime(
-                    &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));
-
-                totalTime += double_millis(enqTime);
-            }
+            HIP_CHECK_EXC(
+                hipEventElapsedTime(&eventMs, startEvents->front().front(), stopEvents->back().back()));
+            totalTime = double_millis(eventMs);
             if(totalTime < m_currentBestWarmUpTime)
                 m_currentBestWarmUpTime = totalTime;
             else if(totalTime * m_skip_slow_solution_ratio > m_currentBestWarmUpTime)
@@ -333,16 +333,13 @@ namespace TensileLite
 
         void BenchmarkTimer::preEnqueues(hipStream_t const& stream)
         {
+            if(m_numSyncsCompleted != 0)
+                return;
+
             if(!m_useGPUTimer)
             {
                 HIP_CHECK_EXC(hipDeviceSynchronize());
                 m_startTime = clock::now();
-            }
-            else
-            {
-                static_cast<void>(hipEventCreate(&start));
-                static_cast<void>(hipEventCreate(&stop));
-                static_cast<void>(hipEventRecord(start, stream));
             }
         }
 
@@ -350,15 +347,13 @@ namespace TensileLite
                                           TimingEvents const& stopEvents,
                                           hipStream_t const&  stream)
         {
+            if(m_numSyncsCompleted + 1 < m_numSyncsInBenchmark)
+                return;
+
             if(!m_useGPUTimer)
             {
                 HIP_CHECK_EXC(hipDeviceSynchronize());
                 m_endTime = clock::now();
-            }
-            else
-            {
-                static_cast<void>(hipEventRecord(stop, stream));
-                static_cast<void>(hipEventSynchronize(stop));
             }
         }
 
@@ -366,46 +361,63 @@ namespace TensileLite
                                               TimingEvents const&            startEvents,
                                               TimingEvents const&            stopEvents)
         {
-            double_millis totalTime(0.0);
+            double_millis compareTotalTime(0.0);
+            double_millis rawTotalTime(0.0);
 
             if(m_useGPUTimer)
             {
-                if((start == nullptr) && (stop == nullptr))
-                {
-                    float enqTime = 0.0f;
-                    HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-                    for(size_t i = 0; i < startEvents->size(); i++)
-                    {
-                        HIP_CHECK_EXC(hipEventElapsedTime(
-                            &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));
+                size_t subIterations = benchmarkHotSubIterations(m_useGPUTimer);
+                if(startEvents->empty() || stopEvents->empty())
+                    throw std::runtime_error(
+                        "[BenchmarkTimer] GPU timing requires per-hot-iteration timing events.");
+                if(startEvents->size() != stopEvents->size())
+                    throw std::runtime_error(
+                        "[BenchmarkTimer] Timing event count mismatch for benchmark enqueues.");
+                if(stopEvents->back().empty())
+                    throw std::runtime_error(
+                        "[BenchmarkTimer] Missing stop events for the final benchmark enqueue.");
 
-                        totalTime += double_millis(enqTime);
-                    }
-                }
-                else
+                HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
+
+                for(size_t logicalIdx = 0; logicalIdx < startEvents->size(); ++logicalIdx)
                 {
+                    auto const& iterationStarts = startEvents[logicalIdx];
+                    auto const& iterationStops  = stopEvents[logicalIdx];
+
+                    if(iterationStarts.empty() || iterationStops.empty())
+                        throw std::runtime_error(
+                            "[BenchmarkTimer] Missing bench-like timing events for a hot iteration.");
+
                     float eventMs = 0.0f;
-                    static_cast<void>(hipEventElapsedTime(&eventMs, start, stop));
-                    totalTime = double_millis(eventMs);
-                    static_cast<void>(hipEventDestroy(start));
-                    static_cast<void>(hipEventDestroy(stop));
+                    HIP_CHECK_EXC(hipEventElapsedTime(
+                        &eventMs, iterationStarts.front(), iterationStops.back()));
+                    double rawEventUs = eventMs * 1000.0f;
+                    rawTotalTime += double_millis(rawEventUs / 1000.0);
+                    compareTotalTime += double_millis((rawEventUs / subIterations) / 1000.0);
                 }
             }
             else
             {
-                totalTime = double_millis(m_endTime - m_startTime);
+                compareTotalTime = double_millis(m_endTime - m_startTime);
+                rawTotalTime     = compareTotalTime;
             }
 
-            m_timeInSolution += totalTime;
-            m_totalGPUTime += totalTime;
             m_numEnqueuesInSolution += startEvents->size();
+            m_numSyncsCompleted++;
 
-            // Report GPU execution time for timing instrumentation
-            reportTiming("gpu_kernel_execution", totalTime.count());
+            m_compareTimeInSolution += compareTotalTime;
+            m_rawTimeInSolution += rawTotalTime;
+
+            if(m_numSyncsCompleted < m_numSyncsInBenchmark)
+                return;
+
+            // Timing instrumentation and sleep should use the raw timed window,
+            // not the normalized per-kernel compare value.
+            reportTiming("gpu_kernel_execution", m_rawTimeInSolution.count());
 
             if(m_sleepPercent > 0)
             {
-                auto sleepTime = totalTime * (m_sleepPercent / 100.0);
+                auto sleepTime = m_rawTimeInSolution * (m_sleepPercent / 100.0);
 
                 std::this_thread::sleep_for(sleepTime);
             }

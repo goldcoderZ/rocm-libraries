@@ -193,6 +193,7 @@ namespace TensileLite
 
             std::shared_ptr<ProblemInputs> prepareCPUInputs(ContractionProblemGemm const& problem)
             {
+                syncProblemLocalBufferGeometry(problem, true);
                 if(m_cpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
                    && !m_problemDependentData)
                 {
@@ -307,6 +308,8 @@ namespace TensileLite
                    && m_boundsCheck == BoundsCheckMode::GuardPageAll)
                     m_curBoundsCheck = BoundsCheckMode::GuardPageBack;
 
+                syncProblemLocalBufferGeometry(problem, true);
+
                 hipMemcpyKind kind;
 
                 bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
@@ -352,26 +355,6 @@ namespace TensileLite
                                m_groupedOffsets,
                                problem,
                                hipMemcpyDeviceToDevice);
-                    if(m_rotatingMode == 1 && m_rotatingBuffer > 0)
-                    {
-                        auto mem = m_rm->getRotatingMemory();
-                        // init mode 1 rotating data
-                        for(size_t j = 1; j < mem.size(); j++)
-                            for(size_t i = 0; i < m_vdata.size(); i++)
-                            {
-                                auto& desc = problem.tensors()[i];
-                                auto  it   = m_vdata[i].pristine.find(desc.dataType());
-                                if(it != m_vdata[i].pristine.end())
-                                {
-                                    auto& p = it->second;
-                                    if(i <= ContractionProblemGemm::TENSOR::METADATA)
-                                        HIP_CHECK_EXC(hipMemcpy(mem[j][i].data.get(),
-                                                                p.gpuInput.current.get(),
-                                                                mem[j][i].size,
-                                                                hipMemcpyDeviceToDevice));
-                                }
-                            }
-                    }
                     m_gpuInit = true;
                 }
                 initializeGPUBatchedInputs(problem);
@@ -800,15 +783,33 @@ namespace TensileLite
                 return m_curBoundsCheck;
             }
 
+            void resetBenchmarkState()
+            {
+                m_gpuInit = false;
+                m_numRunsInSolution = 0;
+                m_curBoundsCheck = (m_boundsCheck == BoundsCheckMode::GuardPageAll)
+                                       ? BoundsCheckMode::GuardPageFront
+                                       : m_boundsCheck;
+            }
+
             virtual bool needMoreBenchmarkRuns() const override
             {
                 return false;
             }
-            virtual void preBenchmarkRun() override {}
+            virtual void preBenchmarkRun() override
+            {
+                resetBenchmarkState();
+            }
             virtual void postBenchmarkRun() override {}
-            virtual void preProblem(ContractionProblem* const problem) override {}
+            virtual void preProblem(ContractionProblem* const) override
+            {
+                resetBenchmarkState();
+            }
             virtual void postProblem() override {}
-            virtual void preSolution(ContractionSolution* const solution) override {}
+            virtual void preSolution(ContractionSolution* const) override
+            {
+                resetBenchmarkState();
+            }
             virtual void postSolution() override {}
             virtual bool needMoreRunsInSolution() const override
             {
@@ -914,11 +915,19 @@ namespace TensileLite
 
             void allocNewGPUInputs();
 
+            void initializeAllocatedPristineInputs();
+
             void copyValidToGPUBuffer(ContractionProblemGemm const& problem);
 
             void copySwizzledToGPUBuffer(ContractionProblemGemm const& problem);
 
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem);
+
+            size_t problemTensorElements(ContractionProblemGemm const& problem,
+                                         size_t                       tensorIdx) const;
+
+            bool syncProblemLocalBufferGeometry(ContractionProblemGemm const& problem,
+                                                bool                         reallocate);
 
             void initializeCPUInputs(ContractionProblemGroupedGemm const& problem);
             void initializeCPUInputs(ContractionProblemGemm const& problem);
@@ -1012,10 +1021,12 @@ namespace TensileLite
             /// and must be reinitialized for each problem. Pristine copy on GPU
             /// cannot be used with problem dependent data.
             bool m_problemDependentData = false;
+            bool m_problemLocalBufferGeometry = false;
 
             int64_t                         m_rotatingBuffer = 0;
             std::shared_ptr<RotatingMemory> m_rm;
             int32_t                         m_rotatingMode = 0;
+            std::vector<std::shared_ptr<void>> m_activeRotatingBuffers;
         };
 
         template <>

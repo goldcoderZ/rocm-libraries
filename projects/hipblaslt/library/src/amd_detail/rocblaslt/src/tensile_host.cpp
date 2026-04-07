@@ -2386,6 +2386,7 @@ struct TensileDataGemm
     TensileLite::ContractionInputs             inputs;
     std::vector<TensileLite::KernelInvocation> kernels;
     int                                        algoIndex = std::numeric_limits<int>::max();
+    TensileLite::hip::SolutionAdapter*         adapter   = nullptr;
 };
 
 struct TensileDataGroupedGemm
@@ -2943,6 +2944,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
         {
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
+            data->adapter = adapter;
 
             data->algoIndex = *solutionIndex;
             auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
@@ -3118,6 +3120,24 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
+        auto layerMode         = get_logger_layer_mode();
+        bool markerLogging     = rocblaslt::Debug::Instance().printLogAsMarker();
+        bool benchCommandLog   = rocblaslt::Debug::Instance().benchPrintCommand();
+        bool benchLogging      = (layerMode & rocblaslt_layer_mode_log_bench) || markerLogging
+                              || benchCommandLog;
+        bool profileLogging    = (layerMode & rocblaslt_layer_mode_log_profile) != 0;
+        bool extendedProfiling = (layerMode & rocblaslt_layer_mode_log_extended_profile) != 0;
+
+        if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
+        {
+            std::shared_ptr<TensileDataGemm> data
+                = std::static_pointer_cast<TensileDataGemm>(gemmData);
+            if(data->adapter && !benchLogging && !profileLogging && !extendedProfiling)
+            {
+                return hip2RocStatus(data->adapter->launchKernels(data->kernels, stream, start, stop));
+            }
+        }
+
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                                library;
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -3141,9 +3161,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
         {
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
-            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-               || rocblaslt::Debug::Instance().printLogAsMarker()
-               || rocblaslt::Debug::Instance().benchPrintCommand())
+            if(benchLogging)
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
@@ -3154,7 +3172,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                                             hotIterations,
                                             true);
             }
-            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_profile)
+            if(profileLogging)
             {
                 logProfileFromTensileDataGemm(data->problem,
                                               data->inputs,
@@ -3166,7 +3184,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                                               true);
             }
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
-            if(rocblaslt::Debug::Instance().printLogAsMarker())
+            if(markerLogging)
                 rocblaslt::Debug::Instance().logMarkerStop();
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -3180,9 +3198,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                 return rocblaslt_status_not_initialized;
             }
 
-            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-               || rocblaslt::Debug::Instance().printLogAsMarker()
-               || rocblaslt::Debug::Instance().benchPrintCommand())
+            if(benchLogging)
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
@@ -3193,7 +3209,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                                             hotIterations,
                                             true);
             }
-            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_profile))
+            if(profileLogging)
             {
                 logProfileFromTensileDataGemm(data->problem,
                                               data->inputs,
@@ -3205,7 +3221,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                                               false);
             }
             auto solution = library->getSolutionByIndex(*hardware, data->algoIndex);
-            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
+            if(extendedProfiling)
             {
                 logExtendedProfileFromTensileDataGemm(data->problem,
                                                       data->inputs,
@@ -3220,7 +3236,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             }
 
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
-            if(rocblaslt::Debug::Instance().printLogAsMarker())
+            if(markerLogging)
                 rocblaslt::Debug::Instance().logMarkerStop();
         }
         else

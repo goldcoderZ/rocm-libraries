@@ -27,6 +27,7 @@
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
 #include "hipblaslt_internal.hpp"
+#include "tensile_host.hpp"
 #include <Debug.hpp>
 #include <algorithm>
 #include <hip/hip_runtime.h>
@@ -878,13 +879,20 @@ namespace hipblaslt_ext
     hipblasStatus_t GemmInstance::run(hipStream_t stream, hipEvent_t start, hipEvent_t stop)
     try
     {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtRunCpp");
         if(m_gemm_count == 0)
         {
-            rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
 
+        if(get_logger_layer_mode() == rocblaslt_layer_mode_none
+           && !rocblaslt::Debug::Instance().printLogAsMarker())
+        {
+            auto gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
+            return RocBlasLtStatusToHIPStatus(
+                runKernelFromInvocation((rocblaslt_handle)m_handle, gemmType, m_data, stream, start, stop));
+        }
+
+        rocblaslt::Debug::Instance().markerStart("hipblasLtRunCpp");
         auto gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         auto status   = RocBlasLtStatusToHIPStatus(
             rocblaslt_run_cpp((rocblaslt_handle)m_handle, gemmType, m_data, stream, start, stop));

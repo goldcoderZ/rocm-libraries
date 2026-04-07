@@ -94,6 +94,7 @@ struct Arguments
 
     int32_t iters;
     int32_t cold_iters;
+    int32_t num_benchmarks;
 
     uint32_t algo;
     int32_t  solution_index;
@@ -215,6 +216,7 @@ struct Arguments
     OPER(batch_count) SEP            \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
+    OPER(num_benchmarks) SEP         \
     OPER(algo) SEP                   \
     OPER(solution_index) SEP         \
     OPER(requested_solution_num) SEP \

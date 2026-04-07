@@ -378,13 +378,12 @@ namespace TensileLite
                                 bool isOutput = true;
                                 rv.back().setAmaxD(
                                     m_tensorTypes[ContractionProblemGemm::TENSOR::AMAXD], isOutput);
-                                rv.back().setSynchronizer(rocisa::DataType::Int32, 1);
                             }
-                            else
-                            {
-                                rv.back().setSynchronizer(
-                                    m_constantTypes[ContractionProblemGemm::CONST::ALPHA], 409600);
-                            }
+
+                            // Match the hipBLASLt handle-side synchronizer pool sizing used by
+                            // SynchronizerSizeCheck and MBSK kernels, including AmaxD flows.
+                            rv.back().setSynchronizer(rocisa::DataType::Int32,
+                                                      static_cast<size_t>(409600) * 16);
                             if(j < m_activationEnumArg.size())
                             {
                                 rv.back().setParams().setActivationEnum(m_activationEnumArg[j]);
