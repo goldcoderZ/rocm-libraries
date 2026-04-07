@@ -165,11 +165,6 @@ struct BlockGemmARegBRegCRegV1
         }
     }
 
-    // C += A * B with MX scaling and packed-in-two (XdlPack) optimization
-    // Scale tensors contain pre-packed int32_t: each int32_t holds MXdlPack * KXdlPack e8m0_t
-    // values (for A) or NXdlPack * KXdlPack (for B), packed on the host.
-    // Uses OpSel (0-3) to select which byte within the packed int32_t for each MFMA call.
-    // XdlPack template parameters default to 2; fall back to 1 when iteration count is too small.
     template <typename CBlockTensor, typename ABlockTensor, typename BBlockTensor>
     CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                    const ABlockTensor& a_block_tensor,
@@ -253,6 +248,11 @@ struct BlockGemmARegBRegCRegV1
         });
     }
 
+    // C += A * B with MX scaling and packed-in-two (XdlPack) optimization
+    // Scale tensors contain pre-packed int32_t: each int32_t holds MXdlPack * KXdlPack e8m0_t
+    // values (for A) or NXdlPack * KXdlPack (for B), packed on the host.
+    // Uses OpSel (0-3) to select which byte within the packed int32_t for each MFMA call.
+    // XdlPack template parameters default to 2; fall back to 1 when iteration count is too small.
     template <typename CBlockTensor,
               typename ABlockTensor,
               typename BBlockTensor,
