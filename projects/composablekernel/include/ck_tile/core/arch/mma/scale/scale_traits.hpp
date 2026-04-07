@@ -5,7 +5,7 @@
 
 #include "ck_tile/core/numeric/float8.hpp"
 #include "ck_tile/core/numeric/pk_fp4.hpp"
-// #include "ck_tile/core/numeric/pk_fp6.hpp"
+#include "ck_tile/core/numeric/pk_fp6.hpp"
 
 #include <cstdint>
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
@@ -32,11 +32,11 @@ struct ScaleDataTypeToFlag<bf8_t> // e5m2
     static constexpr std::int32_t value = 1;
 };
 
-// template <>
-// struct ScaleDataTypeToFlag<pk_fp6_t<1>> // e2m3
-// {
-//     static constexpr std::int32_t value = 2;
-// };
+template <>
+struct ScaleDataTypeToFlag<pk_fp6x16_t> // e2m3
+{
+    static constexpr std::int32_t value = 2;
+};
 
 // template <>
 // struct ScaleDataTypeToFlag<bf6_t> // e3m2
