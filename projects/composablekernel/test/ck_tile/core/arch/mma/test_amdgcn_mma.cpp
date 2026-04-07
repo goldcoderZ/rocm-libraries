@@ -309,6 +309,8 @@ TEST(TestAmdgcnMma, MmaDefaultSelectorUnsupported)
     EXPECT_TRUE((std::is_same<typename SelectedMma::OpType, Unsupported>::value));
     // IsSupported should be false
     EXPECT_FALSE(MmaOpTraits<SelectedMma>::IsSupported);
+    // Compile-time check that print is instantiable for the default MmaOp
+    (void)static_cast<void (*)(MmaOpTraits<SelectedMma> const&)>(print);
 }
 
 // Test MmaDefaultSelector for supported DummyAmdgcnMma on WaveTile sizes other than 16x16x16
