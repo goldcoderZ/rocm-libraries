@@ -38,7 +38,9 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
+#endif
 #include "near.hpp"
 #include "norm.hpp"
 #include "unit.hpp"
@@ -833,7 +835,7 @@ void copy_gemm_to_host(hipStream_t                   stream,
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
-        CHECK_HIP_ERROR(synchronize(hDst[gemmIdx], dSrc[gemmIdx]));
+        CHECK_HIP_ERROR(synchronize(hDst[gemmIdx], dSrc[gemmIdx], 0, 0, 0, 0, 1, false, stream));
     }
 }
 
@@ -876,16 +878,16 @@ void check(hipStream_t                   stream,
     {
         if(!arg.gradient && arg.use_e)
         {
-            CHECK_HIP_ERROR(synchronize(hE[gemmIdx], dE[gemmIdx]));
+            CHECK_HIP_ERROR(synchronize(hE[gemmIdx], dE[gemmIdx], 0, 0, 0, 0, 1, false, stream));
         }
 
         if(arg.amaxD)
         {
-            CHECK_HIP_ERROR(synchronize(hAmaxD[gemmIdx], dAmaxD[gemmIdx]));
+            CHECK_HIP_ERROR(synchronize(hAmaxD[gemmIdx], dAmaxD[gemmIdx], 0, 0, 0, 0, 1, false, stream));
         }
         if(arg.gradient && arg.bias_vector)
         {
-            CHECK_HIP_ERROR(synchronize(hBias[gemmIdx], dBias[gemmIdx]));
+            CHECK_HIP_ERROR(synchronize(hBias[gemmIdx], dBias[gemmIdx], 0, 0, 0, 0, 1, false, stream));
         }
         if(arg.unit_check)
         {
@@ -1899,9 +1901,12 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         hipblaslt_seedrand();
 
-#ifdef HIPBLASLT_USE_ROCROLLER
         if(isBlockScaling(arg.scaleA))
         {
+#if !HIPBLASLT_ENABLE_MXDATAGENERATOR
+            hipblaslt_cout << "MX format (block scaling) is not supported when mxDataGenerator is disabled." << std::endl;
+            return;
+#else
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01)
@@ -1941,10 +1946,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             // Copy data and scale to device buffers
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
+#endif
         }
         else
         {
-#endif
             hipblaslt_init_device(ABC_dims::A,
                                   arg.initialization,
                                   alpha_isnan_type(arg, Talpha),
@@ -1956,10 +1961,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
                                                                      : stride_a[i],
                                   num_batches[i]);
-#ifdef HIPBLASLT_USE_ROCROLLER
         }
         if(isBlockScaling(arg.scaleB))
         {
+#if !HIPBLASLT_ENABLE_MXDATAGENERATOR
+            hipblaslt_cout << "MX format (block scaling) is not supported when mxDataGenerator is disabled." << std::endl;
+            return;
+#else
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01)
@@ -1997,10 +2005,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             // Copy data and scale to device buffers
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
+#endif
         }
         else
         {
-#endif
             hipblaslt_init_device(ABC_dims::B,
                                   arg.initialization,
                                   alpha_isnan_type(arg, Talpha),
@@ -2012,9 +2020,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
                                                                      : stride_b[i],
                                   num_batches[i]);
-#ifdef HIPBLASLT_USE_ROCROLLER
         }
-#endif
         hipblaslt_init_device(ABC_dims::C,
                               arg.initialization,
                               beta_isnan_type(arg, Talpha),
@@ -2040,7 +2046,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         A_col[i],
                                         lda[i],
                                         realDataTypeSize(TiA),
-                                        do_swizzle_a));
+                                        do_swizzle_a,
+                                        stream));
             CHECK_HIP_ERROR(synchronize(hB[i],
                                         dB[i],
                                         num_batches[i],
@@ -2048,8 +2055,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         B_col[i],
                                         ldb[i],
                                         realDataTypeSize(TiB),
-                                        do_swizzle_b));
-            CHECK_HIP_ERROR(synchronize(hC[i], dC[i]));
+                                        do_swizzle_b,
+                                        stream));
+            CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
 
             if(arg.dump_matrix)
             {

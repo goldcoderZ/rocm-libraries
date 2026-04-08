@@ -375,8 +375,10 @@ namespace TensileLite
 
             auto k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
             bool isTF32 = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
-            bool isTF32x1 = (problem.computeInputType() == rocisa::DataType::BFloat16
-                && problem.computeType() == rocisa::DataType::Float);
+            bool isTF32x1 = (problem.computeInputTypeA() == rocisa::DataType::BFloat16
+                && problem.computeType() == rocisa::DataType::Float
+                && problem.a().dataType() == rocisa::DataType::Float
+                && problem.b().dataType() == rocisa::DataType::Float);
             double threshold = -1.0;
             if (isTF32) {
                 threshold = 0.01 * sqrt(double(k));
@@ -544,9 +546,17 @@ namespace TensileLite
 
             if(m_printTensorA)
             {
-                auto a = problem.a();
                 m_reporter->logTensor(
                     LogLevel::Verbose, "A", reference.a, problem.a(), reference.a);
+                if(problem.a().dataType() == rocisa::DataType::Float4
+                   && problem.mxBlockA() > 0)
+                {
+                    m_reporter->logTensor(LogLevel::Verbose,
+                                          "MXSA",
+                                          reference.mxsa,
+                                          problem.mxsa(),
+                                          reference.mxsa);
+                }
                 if(problem.sparse() && problem.sparse() != 2)
                 {
                     m_reporter->logTensor(LogLevel::Verbose,
@@ -559,9 +569,17 @@ namespace TensileLite
 
             if(m_printTensorB)
             {
-                auto b = problem.b();
                 m_reporter->logTensor(
                     LogLevel::Verbose, "B", reference.b, problem.b(), reference.b);
+                if(problem.b().dataType() == rocisa::DataType::Float4
+                   && problem.mxBlockB() > 0)
+                {
+                    m_reporter->logTensor(LogLevel::Verbose,
+                                          "MXSB",
+                                          reference.mxsb,
+                                          problem.mxsb(),
+                                          reference.mxsb);
+                }
                 if(problem.sparse() && problem.sparse() == 2)
                 {
                     m_reporter->logTensor(LogLevel::Verbose,

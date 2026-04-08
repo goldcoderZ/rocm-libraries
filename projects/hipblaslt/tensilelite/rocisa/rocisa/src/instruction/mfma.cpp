@@ -62,6 +62,12 @@ namespace rocisa
             return DataType::Float8BFloat8;
         case InstType::INST_BF8_F8:
             return DataType::BFloat8Float8;
+        case InstType::INST_F6:
+            return DataType::Float6;
+        case InstType::INST_BF6:
+            return DataType::BFloat6;
+        case InstType::INST_F4:
+            return DataType::Float4;
         default:
             throw std::runtime_error("Unknown instruction type");
         }
@@ -107,7 +113,7 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
-                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::optional<InstructionInput>&,
                       bool,
                       const std::string&>(),
              nb::arg("instType"),
@@ -117,7 +123,7 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("acc"),
              nb::arg("a"),
              nb::arg("b"),
-             nb::arg("acc2")    = nullptr,
+             nb::arg("acc2")    = nb::none(),
              nb::arg("neg")     = false,
              nb::arg("comment") = "")
         .def_rw("a", &rocisa::MFMAInstruction::a)
@@ -159,5 +165,42 @@ void mfma_inst(nb::module_ m_mfma)
         .def("__str__", &rocisa::SMFMAInstruction::toString)
         .def("__deepcopy__", [](const rocisa::SMFMAInstruction& self, const nb::dict&) {
             return new rocisa::SMFMAInstruction(self);
+        });
+
+    nb::class_<rocisa::MXMFMAInstruction, rocisa::Instruction>(m_mfma, "MXMFMAInstruction")
+        .def(nb::init<rocisa::InstType,
+                      rocisa::InstType,
+                      const std::vector<int>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::optional<rocisa::VOP3PModifiers>&,
+                      const std::string&>(),
+             nb::arg("instType"),
+             nb::arg("accType"),
+             nb::arg("variant"),
+             nb::arg("acc"),
+             nb::arg("a"),
+             nb::arg("b"),
+             nb::arg("acc2")    = nullptr,
+             nb::arg("mxsa")    = nullptr,
+             nb::arg("mxsb")    = nullptr,
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def_rw("a", &rocisa::MXMFMAInstruction::a)
+        .def_rw("b", &rocisa::MXMFMAInstruction::b)
+        .def_rw("acc", &rocisa::MXMFMAInstruction::acc)
+        .def_rw("acc2", &rocisa::MXMFMAInstruction::acc2)
+        .def_rw("mxsa", &rocisa::MXMFMAInstruction::mxsa)
+        .def_rw("mxsb", &rocisa::MXMFMAInstruction::mxsb)
+        .def_rw("vop3", &rocisa::MXMFMAInstruction::vop3)
+        .def("getParams", &rocisa::MXMFMAInstruction::getParams)
+        .def("getIssueLatency", &rocisa::MXMFMAInstruction::getIssueLatency)
+        .def("__str__", &rocisa::MXMFMAInstruction::toString)
+        .def("__deepcopy__", [](const rocisa::MXMFMAInstruction& self, const nb::dict&) {
+            return new rocisa::MXMFMAInstruction(self);
         });
 }

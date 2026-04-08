@@ -72,16 +72,27 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
                    else tPA["nrp"]*tPA["nrc"]*max(tPA["nwcv"],tPA["nwpv"])//tPA["nwcvpi"]
             numB = 0 if (kernel["DirectToLdsB"] or  kernel["DirectToVgprB"]) \
                    else tPB["nrp"]*tPB["nrc"]*max(tPB["nwcv"],tPB["nwpv"])//tPB["nwcvpi"]
-
+            numMXSA = 0
+            numMXSB = 0
+            if kernel["ProblemType"]["MXBlockA"]:
+                numMXSA = 0 if (kernel["DirectToLdsA"] or kernel["DirectToVgprA"]) \
+                       else tPA["MX"]["nrp"]*tPA["MX"]["nrc"]*max(tPA["MX"]["nwcv"],tPA["MX"]["nwpv"])//tPA["MX"]["nwcvpi"]
+            if kernel["ProblemType"]["MXBlockB"]:
+                numMXSB = 0 if (kernel["DirectToLdsB"] or kernel["DirectToVgprB"]) \
+                       else tPB["MX"]["nrp"]*tPB["MX"]["nrc"]*max(tPB["MX"]["nwcv"],tPB["MX"]["nwpv"])//tPB["MX"]["nwcvpi"]
             numM = 0
             if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
               tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
               numM = tPM["nrp"]*tPM["nrc"]*max(tPM["nwcv"],tPM["nwpv"])//tPM["nwcvpi"]
-            dscnt += skipLocalWrite * (numA + numB + numM)
+            dscnt += skipLocalWrite * (numA + numB + numM + numMXSA + numMXSB)
         if skipLocalRead > -1:
-            numReadsPerIterA = 0 if kernel["DirectToVgprA"] else states.numReadsPerIterA
-            numReadsPerIterB = 0 if kernel["DirectToVgprB"] else states.numReadsPerIterB
-            readsPerIter = numReadsPerIterA + numReadsPerIterB + states.numReadsPerIterMetadata
+            numInstPerReadA  = 2 if (tPA["localReadInstruction"].blockWidth == 6) else 1
+            numInstPerReadB  = 2 if (tPB["localReadInstruction"].blockWidth == 6) else 1
+            numReadsPerIterA = 0 if kernel["DirectToVgprA"] else states.numReadsPerIterA * numInstPerReadA
+            numReadsPerIterB = 0 if kernel["DirectToVgprB"] else states.numReadsPerIterB * numInstPerReadB
+            numReadsPerIterMXSA = states.numReadsPerIterMXSA if (kernel["ProblemType"]["MXBlockA"] and (not kernel["DirectToVgprMXSA"])) else 0
+            numReadsPerIterMXSB = states.numReadsPerIterMXSB if (kernel["ProblemType"]["MXBlockB"] and (not kernel["DirectToVgprMXSB"])) else 0
+            readsPerIter = numReadsPerIterA + numReadsPerIterMXSA + numReadsPerIterB + numReadsPerIterMXSB + states.numReadsPerIterMetadata
             dscnt += skipLocalRead * readsPerIter
 
     skipGR = skipGlobalRead > -1 or skipGlobalReadInst > -1
@@ -89,12 +100,14 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
     if skipGR:
         numA = kernel["NumLoadsPerpendicularA"] * kernel["NumLoadsCoalescedA"]
         numB = kernel["NumLoadsPerpendicularB"] * kernel["NumLoadsCoalescedB"]
+        numMXSA = kernel["NumLoadsPerpendicularMXSA"] * kernel["NumLoadsCoalescedMXSA"] if kernel["ProblemType"]["MXBlockA"] else 0
+        numMXSB = kernel["NumLoadsPerpendicularMXSB"] * kernel["NumLoadsCoalescedMXSB"] if kernel["ProblemType"]["MXBlockB"] else 0
         numM = 0
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
           numM = kernel["NumLoadsPerpendicularMetadata"] * kernel["NumLoadsCoalescedMetadata"]
         numGR = 0
         if skipGlobalRead > -1:
-          numGR += skipGlobalRead * (numA + numB + numM)
+          numGR += skipGlobalRead * (numA + numB + numMXSA + numMXSB + numM)
         if skipGlobalReadInst > -1:
           numGR += skipGlobalReadInst
         vlcnt += numGR
@@ -185,6 +198,8 @@ def accToArchMapper(kernel):
                   dst = vw0 + VectorWidth0 * (tIdx + OutputsPerMFMA1B * (bIdx0 + matrixInstBM * (wgIdx0 + outerTT0 * (vw1 + VectorWidth1 * (bIdx1 + matrixInstBN * (wgIdx1))))))
                 acc2arch[src] = dst
                 arch2acc[dst] = src
+  #print(acc2arch, arch2acc)
+  #exit(1)
   return acc2arch, arch2acc
 
 def accVgprImagNumOffset(kernel):
@@ -195,10 +210,10 @@ def accVgprImagNumOffset(kernel):
 # MapAcctoArch
 # function to map MFMA Acc  Registers to Arch VGPR register
 ##############################################################################
-def mapAcctoArchRegs(kernel, maxAgpr=256, write=False):
+def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None):
   acc2arch, _ = accToArchMapper(kernel)
 
-  complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
+  complexMultiplier = 2 if kernel["ProblemType"]["MacDataTypeA"].isComplex() else 1
   itemList = [None] * kernel["MIRegPerOut"] * complexMultiplier * len(acc2arch)
   accImOffset = accVgprImagNumOffset(kernel)
   for i in range(len(acc2arch)):
@@ -214,13 +229,23 @@ def mapAcctoArchRegs(kernel, maxAgpr=256, write=False):
               return accvgpr(idx)
           accStr = gprfunc(srcIdx)
           if srcIdx >= maxAgpr:
+            # Spilled accumulator: lives in an arch vgpr, not an accvgpr.
+            # For subtile kernels the spilled D-tile vgprs are allocated from
+            # the pool at spilledVgprBase (not at ValuC+N), so reference them
+            # directly.  For non-subtile kernels spilledVgprBase is None and
+            # the legacy "ValuC+N" addressing is used (vgprValuC == 0 there).
+            spill_offset = srcIdx - maxAgpr
+            if spilledVgprBase is not None:
+              spilledVgpr = vgpr(spilledVgprBase + spill_offset)
+            else:
+              spilledVgpr = vgpr("ValuC+%u" % spill_offset)
             if write:
-              itemList[destIdx] = VMovB32(dst=vgpr("ValuC+%u"%(srcIdx-maxAgpr)),
+              itemList[destIdx] = VMovB32(dst=spilledVgpr,
                                              src=vgpr(Holder(name="ValuC")),
                                              comment="copy vreg[%u] to MI out reg" % destIdx)
             else:
               itemList[destIdx] = VMovB32(dst=vgpr(Holder(name="ValuC")),
-                                              src=vgpr("ValuC+%u"%(srcIdx-maxAgpr)),
+                                              src=spilledVgpr,
                                               comment="copy MI out reg to vreg[%u]" % destIdx)
           else:
             if write:
