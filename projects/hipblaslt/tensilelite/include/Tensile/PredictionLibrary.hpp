@@ -181,6 +181,31 @@ namespace TensileLite
                 .b_mx_block_size = 0, // MX Data types come from rocroller
             };
 
+            if(Debug::Instance().useMLRecommender())
+            {
+                std::vector<origami::config_t> ml_config_list(origami_config_list);
+                for(auto& cfg : ml_config_list)
+                    cfg.prediction_mode = origami::prediction_modes_t::ml_recommender;
+                auto prediction_result = origami::rank_configs(
+                    origami_problem, *(pAMDGPU->analyticalHardware), ml_config_list);
+
+                for(const auto& r : prediction_result)
+                {
+                    auto& solution = solution_list[r.config.index].second;
+                    if((*(solution->hardwarePredicate))(hardware)
+                       && (*(solution->problemPredicate))(problem))
+                    {
+                        rv.emplace_back(solution);
+                        if(rv.size() == numSolutions)
+                        {
+                            break;
+                        }
+                    }
+                }
+                lastFindTopRetAll = (rv.size() < numSolutions);
+                return rv;
+            }
+
             auto prediction_result = origami::rank_configs(
                 origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
 

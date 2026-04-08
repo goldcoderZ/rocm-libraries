@@ -9,6 +9,7 @@
 
 #include "origami/gemm.hpp"
 #include "origami/math.hpp"
+#include "origami/ml_recommender.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 #include "origami/types.hpp"
@@ -531,6 +532,115 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
+
+  static const char* bench_env = std::getenv("ORIGAMI_BENCH_PREDICT");
+  static int bench_level = bench_env ? std::atoi(bench_env) : 0;
+
+  if (!configs.empty() &&
+      configs[0].prediction_mode == prediction_modes_t::ml_recommender) {
+    if (bench_level == 2) {
+      constexpr int ML_WARM = 5000;
+      constexpr int ML_COLD = 100;
+      constexpr int ML_FLUSH = 2 * 1024 * 1024 / static_cast<int>(sizeof(float));
+      static std::vector<float> ml_flush_buf(ML_FLUSH, 1.0f);
+      bench_level = 0;
+      std::vector<double> ml_warm;
+      for (int i = 0; i < ML_WARM; ++i) {
+        auto t0 = std::chrono::high_resolution_clock::now();
+        auto r = ml_recommender::rank_configs(problem, hardware, configs);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        ml_warm.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+        (void)r;
+      }
+      std::sort(ml_warm.begin(), ml_warm.end());
+      double w_mean = 0; for (auto t : ml_warm) w_mean += t; w_mean /= ML_WARM;
+      std::vector<double> ml_cold;
+      for (int i = 0; i < ML_COLD; ++i) {
+        volatile float sink = 0;
+        for (int j = 0; j < ML_FLUSH; j += 16) sink += ml_flush_buf[j];
+        (void)sink;
+        auto t0 = std::chrono::high_resolution_clock::now();
+        auto r = ml_recommender::rank_configs(problem, hardware, configs);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        ml_cold.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+        (void)r;
+      }
+      std::sort(ml_cold.begin(), ml_cold.end());
+      double c_mean = 0; for (auto t : ml_cold) c_mean += t; c_mean /= ML_COLD;
+      bench_level = 2;
+      std::fprintf(stderr,
+        "[ORIGAMI] WARM: min=%.2f mean=%.2f p99=%.2f us (%d calls, M=%zu N=%zu K=%zu, %zu configs)\n",
+        ml_warm[0], w_mean, ml_warm[static_cast<int>(ML_WARM*0.99)], ML_WARM,
+        problem.size.m, problem.size.n, problem.size.k, configs.size());
+      std::fprintf(stderr,
+        "[ORIGAMI] COLD: min=%.2f mean=%.2f p99=%.2f us (%d calls, M=%zu N=%zu K=%zu, %zu configs)\n",
+        ml_cold[0], c_mean, ml_cold[static_cast<int>(ML_COLD*0.99)], ML_COLD,
+        problem.size.m, problem.size.n, problem.size.k, configs.size());
+      auto t0 = std::chrono::high_resolution_clock::now();
+      auto result = ml_recommender::rank_configs(problem, hardware, configs);
+      auto t1 = std::chrono::high_resolution_clock::now();
+      std::fprintf(stderr, "[ORIGAMI] rank_configs: %.2f us (M=%zu N=%zu K=%zu, %zu configs)\n",
+        std::chrono::duration<double, std::micro>(t1 - t0).count(),
+        problem.size.m, problem.size.n, problem.size.k, configs.size());
+      return result;
+    }
+    return ml_recommender::rank_configs(problem, hardware, configs);
+  }
+
+  if (bench_level == 2) {
+    constexpr int WARM_ITERS = 5000;
+    constexpr int COLD_ITERS = 100;
+    constexpr int FLUSH_SIZE = 2 * 1024 * 1024 / static_cast<int>(sizeof(float));
+    static std::vector<float> flush_buf(FLUSH_SIZE, 1.0f);
+
+    bench_level = 0;
+
+    std::vector<double> warm_times;
+    warm_times.reserve(WARM_ITERS);
+    for (int i = 0; i < WARM_ITERS; ++i) {
+      auto t0 = std::chrono::high_resolution_clock::now();
+      auto result = rank_configs(problem, hardware, configs);
+      auto t1 = std::chrono::high_resolution_clock::now();
+      warm_times.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+      (void)result;
+    }
+    std::sort(warm_times.begin(), warm_times.end());
+    double warm_min = warm_times[0];
+    double warm_mean = 0;
+    for (auto t : warm_times) warm_mean += t;
+    warm_mean /= WARM_ITERS;
+    double warm_p99 = warm_times[static_cast<int>(WARM_ITERS * 0.99)];
+
+    std::vector<double> cold_times;
+    cold_times.reserve(COLD_ITERS);
+    for (int i = 0; i < COLD_ITERS; ++i) {
+      volatile float sink = 0;
+      for (int j = 0; j < FLUSH_SIZE; j += 16) sink += flush_buf[j];
+      (void)sink;
+      auto t0 = std::chrono::high_resolution_clock::now();
+      auto result = rank_configs(problem, hardware, configs);
+      auto t1 = std::chrono::high_resolution_clock::now();
+      cold_times.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+      (void)result;
+    }
+    std::sort(cold_times.begin(), cold_times.end());
+    double cold_min = cold_times[0];
+    double cold_mean = 0;
+    for (auto t : cold_times) cold_mean += t;
+    cold_mean /= COLD_ITERS;
+    double cold_p99 = cold_times[static_cast<int>(COLD_ITERS * 0.99)];
+
+    bench_level = 2;
+
+    std::fprintf(stderr,
+      "[ORIGAMI] WARM: min=%.2f mean=%.2f p99=%.2f us (%d calls, M=%zu N=%zu K=%zu, %zu configs)\n",
+      warm_min, warm_mean, warm_p99, WARM_ITERS,
+      problem.size.m, problem.size.n, problem.size.k, configs.size());
+    std::fprintf(stderr,
+      "[ORIGAMI] COLD: min=%.2f mean=%.2f p99=%.2f us (%d calls, M=%zu N=%zu K=%zu, %zu configs)\n",
+      cold_min, cold_mean, cold_p99, COLD_ITERS,
+      problem.size.m, problem.size.n, problem.size.k, configs.size());
+  }
 
   struct prediction_result_wrapper_t {
     double latency;

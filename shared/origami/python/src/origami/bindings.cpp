@@ -10,6 +10,7 @@
 #include <nanobind/stl/vector.h>
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
+#include "origami/ml_recommender.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 #include "origami/types.hpp"
@@ -86,6 +87,7 @@ NB_MODULE(origami, m) {
   nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
       .value("estimation", origami::prediction_modes_t::estimation)
       .value("simulation", origami::prediction_modes_t::simulation)
+      .value("ml_recommender", origami::prediction_modes_t::ml_recommender)
       .export_values();
 
   // Add new struct bindings
@@ -316,5 +318,41 @@ NB_MODULE(origami, m) {
   m.def("compute_number_of_output_tiles",
         &origami::streamk::compute_number_of_output_tiles,
         "Compute number of output tiles");
+
+  // ML Recommender
+  auto ml = m.def_submodule("ml_recommender", "ML-based GEMM tile prediction");
+
+  nanobind::enum_<origami::ml_recommender::layout_key_t>(ml, "layout_key_t")
+      .value("BBS_TN", origami::ml_recommender::layout_key_t::BBS_TN)
+      .value("BBS_NN", origami::ml_recommender::layout_key_t::BBS_NN)
+      .value("SSS_MX_NT", origami::ml_recommender::layout_key_t::SSS_MX_NT)
+      .export_values();
+
+  nanobind::class_<origami::ml_recommender::predicted_tile_t>(ml, "predicted_tile_t")
+      .def(nanobind::init<>())
+      .def_rw("mt_m", &origami::ml_recommender::predicted_tile_t::mt_m)
+      .def_rw("mt_n", &origami::ml_recommender::predicted_tile_t::mt_n)
+      .def_rw("mt_k", &origami::ml_recommender::predicted_tile_t::mt_k)
+      .def_rw("score", &origami::ml_recommender::predicted_tile_t::score);
+
+  ml.def("classify_layout",
+         &origami::ml_recommender::classify_layout,
+         "Classify problem into layout key for model selection");
+
+  ml.def("predict_tile",
+         &origami::ml_recommender::predict_tile,
+         "Predict optimal macro-tile for a GEMM problem");
+
+  ml.def("rank_configs",
+         &origami::ml_recommender::rank_configs,
+         "Rank kernel configs by ML-predicted tile affinity");
+
+  ml.def("weights_loaded",
+         &origami::ml_recommender::weights_loaded,
+         "Check if ML recommender weights are loaded");
+
+  ml.def("load_weights",
+         &origami::ml_recommender::load_weights,
+         "Load ML recommender weights from binary file");
 
 }

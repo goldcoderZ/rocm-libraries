@@ -150,6 +150,11 @@ namespace TensileLite
         return m_predictionLib;
     }
 
+    bool Debug::useMLRecommender() const
+    {
+        return m_mlRecommender;
+    }
+
     int Debug::getGridbasedTopSols() const
     {
         return m_gridbasedTopSols;
@@ -207,6 +212,10 @@ namespace TensileLite
         const char* prediction_only = std::getenv("TENSILE_PREDICTION_LIB");
         if(prediction_only)
             m_predictionLib = strtol(prediction_only, nullptr, 0) != 0;
+
+        const char* ml_recommender = std::getenv("TENSILE_ML_RECOMMENDER");
+        if(ml_recommender)
+            m_mlRecommender = strtol(ml_recommender, nullptr, 0) != 0;
 
         const char* solution_index = std::getenv("TENSILE_SOLUTION_INDEX");
         if(solution_index)
