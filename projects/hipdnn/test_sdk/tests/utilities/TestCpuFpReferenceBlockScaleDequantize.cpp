@@ -313,6 +313,45 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp8, IsNegativeScaleE8M0)
 }
 
 // ============================================================================
+// Validation error path tests
+// ============================================================================
+
+TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, ScaleRankExceedsXRank)
+{
+    // Scale tensor has more dimensions than x — should throw
+    const Tensor<float> xTensor({4});
+    const Tensor<float> scaleTensor({2, 2});
+    Tensor<float> yTensor({4});
+
+    EXPECT_THROW(
+        CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false),
+        std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, ScaleDimMismatch)
+{
+    // X: 1x4 with block_size=2 expects scale dims {1, 2}, but scale is {1, 3}
+    const Tensor<float> xTensor({1, 4});
+    const Tensor<float> scaleTensor({1, 3});
+    Tensor<float> yTensor({1, 4});
+
+    EXPECT_THROW(
+        CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false),
+        std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, EmptyXDimsThrows)
+{
+    const Tensor<float> xTensor({});
+    const Tensor<float> scaleTensor({});
+    Tensor<float> yTensor({});
+
+    EXPECT_THROW(
+        CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false),
+        std::runtime_error);
+}
+
+// ============================================================================
 // MX dequantize typed tests: all narrow types with fp8_e8m0 scale
 // ============================================================================
 

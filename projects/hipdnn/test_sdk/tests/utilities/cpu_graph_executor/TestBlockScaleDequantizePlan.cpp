@@ -312,6 +312,98 @@ TYPED_TEST(BlockScaleDequantizeMxPlan, ExecutePlan)
 }
 
 // ============================================================================
+// Non-float input plan typed tests: half/bfloat16 input with float scale
+// ============================================================================
+
+using NonFloatInputPlanTypes
+    = ::testing::Types<MxPlanConfig<DataType::HALF, DataType::FLOAT, DataType::FLOAT>,
+                       MxPlanConfig<DataType::HALF, DataType::FLOAT, DataType::HALF>,
+                       MxPlanConfig<DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT>,
+                       MxPlanConfig<DataType::BFLOAT16, DataType::FLOAT, DataType::BFLOAT16>>;
+
+template <class T>
+class BlockScaleDequantizeNonFloatInputPlan : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(BlockScaleDequantizeNonFloatInputPlan, NonFloatInputPlanTypes, );
+
+TYPED_TEST(BlockScaleDequantizeNonFloatInputPlan, ExecutePlan)
+{
+    using namespace hipdnn_data_sdk::types;
+    using Config = TypeParam;
+    using XType = typename Config::XType;
+    using ScaleType = typename Config::ScaleType;
+    using OutputType = typename Config::OutputType;
+
+    auto builder = createValidBlockScaleDequantizeMxGraph(
+        Config::X_DATA_TYPE, Config::SCALE_DATA_TYPE, Config::OUTPUT_DATA_TYPE);
+    const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graphWrapper.getNode(0);
+    const auto& tensorMap = graphWrapper.getTensorMap();
+    const auto* nodeAttributes = node.attributes_as_BlockScaleDequantizeAttributes();
+    ASSERT_NE(nodeAttributes, nullptr);
+
+    std::vector<int32_t> blockSize;
+    if(nodeAttributes->block_size() != nullptr)
+    {
+        const auto* bs = nodeAttributes->block_size();
+        blockSize.assign(bs->begin(), bs->end());
+    }
+
+    GraphTensorBundle planBundle(tensorMap);
+    GraphTensorBundle directBundle(tensorMap);
+
+    // Set x values
+    auto* planXData = static_cast<XType*>(planBundle.getTensor(1).rawHostData());
+    planXData[0] = XType(1.0f);
+    planXData[1] = XType(1.0f);
+    planXData[2] = XType(2.0f);
+    planXData[3] = XType(2.0f);
+
+    auto* directXData = static_cast<XType*>(directBundle.getTensor(1).rawHostData());
+    directXData[0] = XType(1.0f);
+    directXData[1] = XType(1.0f);
+    directXData[2] = XType(2.0f);
+    directXData[3] = XType(2.0f);
+
+    // Set float scale values: scale[0] = 1.5, scale[1] = 2.0
+    auto* planScaleData = static_cast<ScaleType*>(planBundle.getTensor(2).rawHostData());
+    planScaleData[0] = ScaleType(1.5f);
+    planScaleData[1] = ScaleType(2.0f);
+
+    auto* directScaleData = static_cast<ScaleType*>(directBundle.getTensor(2).rawHostData());
+    directScaleData[0] = ScaleType(1.5f);
+    directScaleData[1] = ScaleType(2.0f);
+
+    BlockScaleDequantizeParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
+                                      *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+                                      *tensorMap.at(nodeAttributes->y_tensor_uid()),
+                                      blockSize,
+                                      nodeAttributes->is_negative_scale());
+
+    auto directXTensor
+        = createShallowTensor<XType>(params.xTensor, directBundle.getTensor(1).rawHostData());
+    auto directScaleTensor = createShallowTensor<ScaleType>(
+        params.scaleTensor, directBundle.getTensor(2).rawHostData());
+    auto directYTensor
+        = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(3).rawHostData());
+
+    CpuFpReferenceBlockScaleDequantize::dequantize(
+        *directXTensor, *directScaleTensor, *directYTensor, blockSize, false);
+
+    auto variantPack = planBundle.toHostVariantPack();
+    BlockScaleDequantizePlan<XType, ScaleType, OutputType, float> plan(std::move(params));
+    plan.execute(variantPack);
+
+    const float tolerance = 1e-2f;
+    const CpuFpReferenceValidation<OutputType> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directBundle.getTensor(3), planBundle.getTensor(3)));
+}
+
+// ============================================================================
 // MX IsApplicable typed tests: narrow types with fp8_e8m0 scale
 // ============================================================================
 
