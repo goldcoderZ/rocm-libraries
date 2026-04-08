@@ -2067,7 +2067,8 @@ inline flatbuffers::FlatBufferBuilder
                                          hipdnn_data_sdk::data_objects::DataType inputDataType
                                          = hipdnn_data_sdk::data_objects::DataType::FLOAT,
                                          hipdnn_data_sdk::data_objects::DataType computeDataType
-                                         = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+                                         = hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                                         bool isNegativeScale = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
@@ -2089,14 +2090,12 @@ inline flatbuffers::FlatBufferBuilder
     auto blockSizeVector = builder.CreateVector(blockSize);
 
     auto blockScaleDequantizeAttributes
-        = hipdnn_data_sdk::data_objects::CreateBlockScaleDequantizeAttributes(
-            builder,
-            1, // x uid
-            2, // scale uid
-            3, // y uid
-            blockSizeVector,
-            false // is_negative_scale
-        );
+        = hipdnn_data_sdk::data_objects::CreateBlockScaleDequantizeAttributes(builder,
+                                                                              1, // x uid
+                                                                              2, // scale uid
+                                                                              3, // y uid
+                                                                              blockSizeVector,
+                                                                              isNegativeScale);
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(

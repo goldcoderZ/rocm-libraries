@@ -65,10 +65,68 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlan)
     auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(3).rawHostData());
 
-    CpuFpReferenceBlockScaleDequantize::dequantize(
-        *directXTensor, *directScaleTensor, *directYTensor, blockSize, false);
+    CpuFpReferenceBlockScaleDequantize::dequantize(*directXTensor,
+                                                   *directScaleTensor,
+                                                   *directYTensor,
+                                                   blockSize,
+                                                   nodeAttributes->is_negative_scale());
 
     // Plan execution
+    auto variantPack = planBundle.toHostVariantPack();
+    BlockScaleDequantizePlan<float, float, float, float> plan(std::move(params));
+    plan.execute(variantPack);
+
+    const float tolerance = 1e-5f;
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directBundle.getTensor(3), planBundle.getTensor(3)));
+}
+
+TEST(TestBlockScaleDequantizePlan, ExecutePlanNegativeScale)
+{
+    auto builder = createValidBlockScaleDequantizeGraph(
+        {65536, 2048, 64, 1}, {2, 32, 32, 64}, DataType::FLOAT, DataType::FLOAT, true);
+    const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graphWrapper.getNode(0);
+    const auto& tensorMap = graphWrapper.getTensorMap();
+
+    const unsigned int seed = getGlobalTestSeed();
+    GraphTensorBundle planBundle(tensorMap);
+    GraphTensorBundle directBundle(tensorMap);
+
+    planBundle.getTensor(1).fillTensorWithRandomValues(0.0f, 1.0f, seed);
+    planBundle.getTensor(2).fillTensorWithRandomValues(0.1f, 2.0f, seed);
+    directBundle.getTensor(1).fillTensorWithRandomValues(0.0f, 1.0f, seed);
+    directBundle.getTensor(2).fillTensorWithRandomValues(0.1f, 2.0f, seed);
+
+    const auto* nodeAttributes = node.attributes_as_BlockScaleDequantizeAttributes();
+    ASSERT_NE(nodeAttributes, nullptr);
+    ASSERT_TRUE(nodeAttributes->is_negative_scale());
+
+    std::vector<int32_t> blockSize;
+    if(nodeAttributes->block_size() != nullptr)
+    {
+        const auto* bs = nodeAttributes->block_size();
+        blockSize.assign(bs->begin(), bs->end());
+    }
+
+    BlockScaleDequantizeParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
+                                      *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+                                      *tensorMap.at(nodeAttributes->y_tensor_uid()),
+                                      blockSize,
+                                      nodeAttributes->is_negative_scale());
+
+    auto directXTensor
+        = createShallowTensor<float>(params.xTensor, directBundle.getTensor(1).rawHostData());
+    auto directScaleTensor
+        = createShallowTensor<float>(params.scaleTensor, directBundle.getTensor(2).rawHostData());
+    auto directYTensor
+        = createShallowTensor<float>(params.yTensor, directBundle.getTensor(3).rawHostData());
+
+    CpuFpReferenceBlockScaleDequantize::dequantize(
+        *directXTensor, *directScaleTensor, *directYTensor, blockSize, true);
+
     auto variantPack = planBundle.toHostVariantPack();
     BlockScaleDequantizePlan<float, float, float, float> plan(std::move(params));
     plan.execute(variantPack);
@@ -163,8 +221,11 @@ using MxPlanTypes
                        MxPlanConfig<DataType::FP8_E5M2, DataType::FP8_E8M0, DataType::FLOAT>,
                        MxPlanConfig<DataType::FP8_E5M2, DataType::FP8_E8M0, DataType::HALF>,
                        MxPlanConfig<DataType::FP4_E2M1, DataType::FP8_E8M0, DataType::FLOAT>,
+                       MxPlanConfig<DataType::FP4_E2M1, DataType::FP8_E8M0, DataType::HALF>,
                        MxPlanConfig<DataType::FP6_E2M3, DataType::FP8_E8M0, DataType::FLOAT>,
-                       MxPlanConfig<DataType::FP6_E3M2, DataType::FP8_E8M0, DataType::FLOAT>>;
+                       MxPlanConfig<DataType::FP6_E2M3, DataType::FP8_E8M0, DataType::HALF>,
+                       MxPlanConfig<DataType::FP6_E3M2, DataType::FP8_E8M0, DataType::FLOAT>,
+                       MxPlanConfig<DataType::FP6_E3M2, DataType::FP8_E8M0, DataType::HALF>>;
 
 template <class T>
 class BlockScaleDequantizeMxPlan : public ::testing::Test
@@ -251,58 +312,49 @@ TYPED_TEST(BlockScaleDequantizeMxPlan, ExecutePlan)
 }
 
 // ============================================================================
-// MX IsApplicable tests
+// MX IsApplicable typed tests: narrow types with fp8_e8m0 scale
 // ============================================================================
 
-TEST(TestBlockScaleDequantizePlanBuilder, IsApplicableFp4E2m1)
+template <DataType CorrectDT, DataType WrongDT>
+struct MxIsApplicableConfig
 {
+    static constexpr auto CORRECT_DATA_TYPE = CorrectDT;
+    static constexpr auto WRONG_DATA_TYPE = WrongDT;
+};
+
+using MxIsApplicableTypes
+    = ::testing::Types<MxIsApplicableConfig<DataType::FP4_E2M1, DataType::FP6_E2M3>,
+                       MxIsApplicableConfig<DataType::FP6_E2M3, DataType::FP6_E3M2>,
+                       MxIsApplicableConfig<DataType::FP6_E3M2, DataType::FP4_E2M1>>;
+
+template <class T>
+class BlockScaleDequantizeMxIsApplicable : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(BlockScaleDequantizeMxIsApplicable, MxIsApplicableTypes, );
+
+TYPED_TEST(BlockScaleDequantizeMxIsApplicable, MatchingTypeIsApplicable)
+{
+    using Config = TypeParam;
+
     auto mxBuilder = createValidBlockScaleDequantizeMxGraph(
-        DataType::FP4_E2M1, DataType::FP8_E8M0, DataType::FLOAT);
+        Config::CORRECT_DATA_TYPE, DataType::FP8_E8M0, DataType::FLOAT);
     const GraphWrapper mxGraphWrapper(mxBuilder.GetBufferPointer(), mxBuilder.GetSize());
 
-    const BlockScaleDequantizePlanBuilder<DataType::FP4_E2M1,
+    const BlockScaleDequantizePlanBuilder<Config::CORRECT_DATA_TYPE,
                                           DataType::FP8_E8M0,
                                           DataType::FLOAT,
                                           DataType::FLOAT>
-        fp4FloatBuilder;
+        matchingBuilder;
     EXPECT_TRUE(
-        fp4FloatBuilder.isApplicable(mxGraphWrapper.getNode(0), mxGraphWrapper.getTensorMap()));
+        matchingBuilder.isApplicable(mxGraphWrapper.getNode(0), mxGraphWrapper.getTensorMap()));
 
-    const BlockScaleDequantizePlanBuilder<DataType::FP6_E2M3,
+    const BlockScaleDequantizePlanBuilder<Config::WRONG_DATA_TYPE,
                                           DataType::FP8_E8M0,
                                           DataType::FLOAT,
                                           DataType::FLOAT>
         wrongTypeBuilder;
     EXPECT_FALSE(
         wrongTypeBuilder.isApplicable(mxGraphWrapper.getNode(0), mxGraphWrapper.getTensorMap()));
-}
-
-TEST(TestBlockScaleDequantizePlanBuilder, IsApplicableFp6E2m3)
-{
-    auto mxBuilder = createValidBlockScaleDequantizeMxGraph(
-        DataType::FP6_E2M3, DataType::FP8_E8M0, DataType::FLOAT);
-    const GraphWrapper mxGraphWrapper(mxBuilder.GetBufferPointer(), mxBuilder.GetSize());
-
-    const BlockScaleDequantizePlanBuilder<DataType::FP6_E2M3,
-                                          DataType::FP8_E8M0,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT>
-        fp6e2m3Builder;
-    EXPECT_TRUE(
-        fp6e2m3Builder.isApplicable(mxGraphWrapper.getNode(0), mxGraphWrapper.getTensorMap()));
-}
-
-TEST(TestBlockScaleDequantizePlanBuilder, IsApplicableFp6E3m2)
-{
-    auto mxBuilder = createValidBlockScaleDequantizeMxGraph(
-        DataType::FP6_E3M2, DataType::FP8_E8M0, DataType::FLOAT);
-    const GraphWrapper mxGraphWrapper(mxBuilder.GetBufferPointer(), mxBuilder.GetSize());
-
-    const BlockScaleDequantizePlanBuilder<DataType::FP6_E3M2,
-                                          DataType::FP8_E8M0,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT>
-        fp6e3m2Builder;
-    EXPECT_TRUE(
-        fp6e3m2Builder.isApplicable(mxGraphWrapper.getNode(0), mxGraphWrapper.getTensorMap()));
 }

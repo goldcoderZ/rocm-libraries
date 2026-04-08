@@ -111,20 +111,42 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp32, NonTrivialScale)
 
 TEST(TestCpuFpReferenceBlockScaleDequantizeFp32, MultiDimBlocking)
 {
-    // X: 2x32x32x64, Scale: 2x32x32x2 => block along trailing dim 3, block_size=32
-    Tensor<float> xTensor({2, 32, 32, 64});
-    Tensor<float> scaleTensor({2, 32, 32, 2});
-    Tensor<float> yTensor({2, 32, 32, 64});
+    // X: 2x4x8, Scale: 2x4x2 => block along trailing dim, block_size=4
+    // Use distinct per-block scale values so spot-checking can detect index mapping bugs.
+    Tensor<float> xTensor({2, 4, 8});
+    Tensor<float> scaleTensor({2, 4, 2});
+    Tensor<float> yTensor({2, 4, 8});
 
     xTensor.fillWithValue(1.0f);
-    scaleTensor.fillWithValue(3.0f);
 
-    CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {32}, false);
+    // Assign distinct scale values: scale[b][r][s] covers x[b][r][s*4..(s+1)*4-1]
+    float scaleVal = 1.0f;
+    for(int b = 0; b < 2; ++b)
+    {
+        for(int r = 0; r < 4; ++r)
+        {
+            for(int s = 0; s < 2; ++s)
+            {
+                scaleTensor.setHostValue(scaleVal, b, r, s);
+                scaleVal += 1.0f;
+            }
+        }
+    }
+
+    CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {4}, false);
 
     auto tolerance = 1e-5f;
-    // Spot check a few values
-    EXPECT_NEAR(yTensor.getHostValue(0, 0, 0, 0), 3.0f, tolerance);
-    EXPECT_NEAR(yTensor.getHostValue(1, 31, 31, 63), 3.0f, tolerance);
+    // Block (0,0,0): x[0][0][0..3] => scale[0][0][0] = 1.0
+    EXPECT_NEAR(yTensor.getHostValue(0, 0, 0), 1.0f, tolerance);
+    EXPECT_NEAR(yTensor.getHostValue(0, 0, 3), 1.0f, tolerance);
+    // Block (0,0,1): x[0][0][4..7] => scale[0][0][1] = 2.0
+    EXPECT_NEAR(yTensor.getHostValue(0, 0, 4), 2.0f, tolerance);
+    EXPECT_NEAR(yTensor.getHostValue(0, 0, 7), 2.0f, tolerance);
+    // Block (0,1,0): x[0][1][0..3] => scale[0][1][0] = 3.0
+    EXPECT_NEAR(yTensor.getHostValue(0, 1, 0), 3.0f, tolerance);
+    // Block (1,3,1): x[1][3][4..7] => scale[1][3][1] = 16.0 (last block)
+    EXPECT_NEAR(yTensor.getHostValue(1, 3, 4), 16.0f, tolerance);
+    EXPECT_NEAR(yTensor.getHostValue(1, 3, 7), 16.0f, tolerance);
 }
 
 TEST(TestCpuFpReferenceBlockScaleDequantizeFp32, MultiTrailingDimBlockSize)

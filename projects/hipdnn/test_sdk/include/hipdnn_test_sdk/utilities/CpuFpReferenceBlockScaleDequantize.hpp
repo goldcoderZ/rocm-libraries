@@ -49,19 +49,35 @@ public:
             effectiveBlockSize[xDims.size() - blockSize.size() + i] = blockSize[i];
         }
 
-        auto dequantizeFunc = [&](const std::vector<int64_t>& xIndices) {
-            // Compute scale indices by dividing by block size for blocked dims
-            std::vector<int64_t> scaleIndices(xIndices.size());
-            for(size_t d = 0; d < xIndices.size(); ++d)
+        // Validate scale dimensions are consistent with data dims and block size.
+        if(scaleDims.size() > xDims.size())
+        {
+            throw std::invalid_argument(
+                "BlockScaleDequantize: scale tensor rank (" + std::to_string(scaleDims.size())
+                + ") must not exceed input tensor rank (" + std::to_string(xDims.size()) + ").");
+        }
+
+        for(size_t d = 0; d < scaleDims.size(); ++d)
+        {
+            const auto expectedScaleDim
+                = (xDims[d] + effectiveBlockSize[d] - 1) / effectiveBlockSize[d];
+            if(scaleDims[d] != expectedScaleDim)
             {
-                if(d < scaleDims.size())
-                {
-                    scaleIndices[d] = xIndices[d] / effectiveBlockSize[d];
-                }
-                else
-                {
-                    scaleIndices[d] = 0;
-                }
+                throw std::invalid_argument("BlockScaleDequantize: scale dim[" + std::to_string(d)
+                                            + "] is " + std::to_string(scaleDims[d])
+                                            + " but expected " + std::to_string(expectedScaleDim)
+                                            + " (ceil(" + std::to_string(xDims[d]) + " / "
+                                            + std::to_string(effectiveBlockSize[d]) + ")).");
+            }
+        }
+
+        auto dequantizeFunc = [&](const std::vector<int64_t>& xIndices) {
+            // Compute scale indices by dividing by block size for blocked dims.
+            // Size to scale rank — getIndex() throws if indices.size() > strides().size().
+            std::vector<int64_t> scaleIndices(scaleDims.size());
+            for(size_t d = 0; d < scaleDims.size(); ++d)
+            {
+                scaleIndices[d] = xIndices[d] / effectiveBlockSize[d];
             }
 
             auto xVal = static_cast<ComputeDataType>(x.getHostValue(xIndices));
