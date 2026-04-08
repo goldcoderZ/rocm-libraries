@@ -184,7 +184,7 @@ list(
     -Wall # Enable most common warnings
     -Wextra # Enable additional warnings not covered by -Wall
     -Wpedantic # Enforce strict ISO C++ compliance
-    -Wno-shadow # Disable variable shadowing warnings (false positives with parameter names)
+    -Wshadow # Warn about variable shadowing
     -Wnon-virtual-dtor # Warn if a class with virtual functions has a non-virtual destructor
     -Wold-style-cast # Warn about C-style casts
     -Wcast-align # Warn about potential performance issues with misaligned casts
@@ -192,7 +192,7 @@ list(
                          # the same name
     -Wconversion # Warn about implicit type conversions that may alter a value
     -Wsign-conversion # Warn about implicit conversions between signed and unsigned types
-    -Wno-null-dereference # Disable null-dereference warnings (false positives with empty checks)
+    -Wnull-dereference # Warn about dereferencing null pointers
     -Wdouble-promotion # Warn when a float is implicitly promoted to a double
     -Wformat=2 # Enable stricter format string checks
     -Winit-self # Warn about variables initialized with itself
