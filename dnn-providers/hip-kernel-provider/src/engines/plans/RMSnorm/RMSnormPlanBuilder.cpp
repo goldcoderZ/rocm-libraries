@@ -8,6 +8,7 @@
 #include "RMSnormFwdPlan.hpp"
 #include "RMSnormPlanBuilder.hpp"
 
+#include <algorithm>
 #include <set>
 
 namespace hip_kernel_provider::rmsnorm
@@ -24,11 +25,24 @@ bool RMSnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    auto anyNodeIsNotF32Compute = [&]() {
+        return !std::all_of(
+            opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
+                return node->computeDataType() == hipdnn_data_sdk::data_objects::DataType::FLOAT;
+            });
+    };
 
     switch(opGraph.nodeCount())
     {
     case 1:
     {
+        // Kernel code always uses fp32 compute type
+        if(anyNodeIsNotF32Compute())
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("RMSnorm plan builder only supports nodes with an fp32 "
+                                    "compute_data_type");
+            return false;
+        }
 
         if(!opGraph.hasOnlySupportedAttributes(
                std::set<hipdnn_data_sdk::data_objects::NodeAttributes>{
