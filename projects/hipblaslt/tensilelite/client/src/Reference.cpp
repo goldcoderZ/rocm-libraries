@@ -32,6 +32,7 @@
 #include "TypedId.hpp"
 
 #include <cstddef>
+#include <iostream>
 #include <omp.h>
 
 #define MAX_OMP_THREADS 64
@@ -977,8 +978,7 @@ namespace TensileLite
             // we could continue down this fast path, because there would be no rounding
             // errors incurred by f32 accumulation. But we do not.
             auto rejectFast = [](const char* reason) {
-                if(g_timingInstrumentationEnabled)
-                    writeLine("FAST_PATH_REJECT:", reason);
+                std::clog << "FAST_PATH_REJECT: " << reason << std::endl;
                 return false;
             };
 
@@ -998,13 +998,12 @@ namespace TensileLite
                || !isSupportedType(problem.c().dataType())
                || !isSupportedType(problem.d().dataType()))
             {
-                if(g_timingInstrumentationEnabled)
-                    writeLine("FAST_PATH_REJECT:unsupported_type"
-                              " A=", TensileLite::ToString(problem.a().dataType()),
-                              " B=", TensileLite::ToString(problem.b().dataType()),
-                              " C=", TensileLite::ToString(problem.c().dataType()),
-                              " D=", TensileLite::ToString(problem.d().dataType()));
-                return false;
+                std::string detail = "unsupported_type"
+                    " A=" + TensileLite::ToString(problem.a().dataType())
+                    + " B=" + TensileLite::ToString(problem.b().dataType())
+                    + " C=" + TensileLite::ToString(problem.c().dataType())
+                    + " D=" + TensileLite::ToString(problem.d().dataType());
+                return rejectFast(detail.c_str());
             }
 
             if(problem.batchIndices().empty())
