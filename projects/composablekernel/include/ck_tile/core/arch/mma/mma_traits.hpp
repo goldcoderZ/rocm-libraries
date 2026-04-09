@@ -3,6 +3,18 @@
 #pragma once
 
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
+
+// Forward-declare MmaOpTraits before including amdgcn_mma.hpp to break a
+// circular include dependency.  The selectors (pulled in transitively through
+// amdgcn_mma → wmma/wmma → wmma_selector → mma_selector → mfma_selector)
+// reference MmaOpTraits<CandidateOp>::IsSupported in dependent contexts that
+// are only instantiated later, so the name just needs to be visible as a
+// class template at definition time.
+namespace ck_tile::core::arch::mma {
+template <typename T>
+struct MmaOpTraits;
+} // namespace ck_tile::core::arch::mma
+
 #include "amdgcn_mma.hpp"
 #include "ck_tile/core/arch/arch.hpp"
 #include "mfma/mfma_traits.hpp"
