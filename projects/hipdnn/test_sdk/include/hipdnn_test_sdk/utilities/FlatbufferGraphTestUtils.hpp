@@ -1605,6 +1605,20 @@ inline flatbuffers::FlatBufferBuilder
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 8, "dbias", inputDataType, &normalizedStrides, &normalizedDims));
 
+    // Epsilon (pass-by-value)
+    const std::vector<int64_t> passByValueDims = {1};
+    const hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        9,
+        "epsilon",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &passByValueDims,
+        &passByValueDims,
+        false,
+        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
+        builder.CreateStruct(epsilonVal).Union()));
+
     auto layernormBackwardAttributes
         = hipdnn_data_sdk::data_objects::CreateLayernormBackwardAttributes(builder,
                                                                            1, // dy tensor uid
@@ -1612,6 +1626,7 @@ inline flatbuffers::FlatBufferBuilder
                                                                            4, // scale tensor uid
                                                                            5, // mean tensor uid
                                                                            6, // rstd tensor uid
+                                                                           9, // epsilon tensor uid
                                                                            3, // dx tensor uid
                                                                            7, // dscale tensor uid
                                                                            8, // dbias tensor uid
