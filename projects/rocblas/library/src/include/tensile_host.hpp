@@ -55,7 +55,8 @@ typedef enum
 
 inline constexpr bool rocblas_default_solution_index(rocblas_int solution_index)
 {
-    return solution_index == c_rocblas_default_solution || solution_index == -1;
+    // all reserved indices will be considered default at this point
+    return (solution_index >= -c_rocblas_solutions_reserved && solution_index <= c_rocblas_default_solution);
 }
 
 inline constexpr bool rocblas_hipblaslt_index(rocblas_int solution_index)

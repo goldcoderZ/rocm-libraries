@@ -30,8 +30,6 @@
 #include "handle.hpp"
 #include "logging.hpp"
 
-#define GEMM_EX_GEMV_SOLUTION_IDX -9
-
 template <typename T>
 rocblas_status rocblas_copy_alpha_beta_to_host_if_on_device(rocblas_handle   handle,
                                                             const T*&        alpha,

@@ -67,10 +67,10 @@ Tests:
   M: [1, 256, 1024]
   N: [1, 256, 1024]
   K: 256
-  lda: [1, 1024]
-  ldb: [1, 1024]
-  ldc: [1, 1024]
-  ldd: [1, 1024]
+  lda: [1024]
+  ldb: [1024]
+  ldc: [1024]
+  ldd: [1024]
   alpha_beta: { alpha: 1, beta: 1 }
   transA_transB: *transA_transB_range
   outofplace: [false, true]

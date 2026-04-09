@@ -217,9 +217,22 @@ rocblas_status rocblas_internal_gemm_ex(rocblas_handle     handle,
                                         int32_t            solution_index,
                                         rocblas_gemm_flags flags)
 {
-    if(algo == rocblas_gemm_algo_solution_index && solution_index == GEMM_EX_GEMV_SOLUTION_IDX
-       && (!rocblas_is_gemv_supported_types<BATCHED, TScal, TiConstPtr, ToConstPtr, ToPtr>()
-           || !rocblas_can_use_gemv_in_gemm(trans_a,
+    bool gemv_solution_requested
+        = algo == rocblas_gemm_algo_solution_index && solution_index == c_rocblas_gemv_solution;
+    constexpr bool gemv_supported_types
+        = rocblas_is_gemv_supported_types<BATCHED, TScal, TiConstPtr, ToConstPtr, ToPtr>();
+
+    if constexpr(!gemv_supported_types)
+    {
+        if(gemv_solution_requested)
+            return rocblas_status_invalid_value;
+    }
+    else
+    {
+        // If our solution_index is set, then use gemv whenever possible
+        // If our solution_index is not set, then use gemv when performant
+        if(gemv_solution_requested
+           && !rocblas_can_use_gemv_in_gemm(trans_a,
                                             trans_b,
                                             m,
                                             n,
@@ -231,32 +244,13 @@ rocblas_status rocblas_internal_gemm_ex(rocblas_handle     handle,
                                             (void*)d,
                                             offset_d,
                                             ldd,
-                                            stride_d)))
-    {
-        return rocblas_status_invalid_value;
-    }
+                                            stride_d))
+        {
+            return rocblas_status_invalid_value;
+        }
 
-    if constexpr(rocblas_is_gemv_supported_types<BATCHED, TScal, TiConstPtr, ToConstPtr, ToPtr>())
-    {
-        // If our solution_index is set, then use gemv whenever possible
-        // If our solution_index is not set, then use gemv when performant
-        bool use_gemv_sol = algo == rocblas_gemm_algo_solution_index
-                            && solution_index == GEMM_EX_GEMV_SOLUTION_IDX
-                            && rocblas_can_use_gemv_in_gemm(trans_a,
-                                                            trans_b,
-                                                            m,
-                                                            n,
-                                                            k,
-                                                            (void*)c,
-                                                            offset_c,
-                                                            ldc,
-                                                            stride_c,
-                                                            (void*)d,
-                                                            offset_d,
-                                                            ldd,
-                                                            stride_d);
         bool use_gemv_perf
-            = (algo != rocblas_gemm_algo_solution_index || solution_index <= 0)
+            = (algo != rocblas_gemm_algo_solution_index || solution_index == 0)
               && rocblas_use_gemv_in_gemm<BATCHED, TScal, TiConstPtr, ToConstPtr, ToPtr>(handle,
                                                                                          trans_a,
                                                                                          trans_b,
@@ -274,7 +268,7 @@ rocblas_status rocblas_internal_gemm_ex(rocblas_handle     handle,
                                                                                          ldd,
                                                                                          stride_d);
 
-        if(use_gemv_sol || use_gemv_perf)
+        if(gemv_solution_requested || use_gemv_perf)
         {
             if(n == 1)
             {
@@ -343,6 +337,9 @@ rocblas_status rocblas_internal_gemm_ex(rocblas_handle     handle,
             return rocblas_status_internal_error; // rocblas_use_gemv_in_gemm() requires m == 1 || n == 1
         }
     }
+
+    if(gemv_solution_requested)
+        solution_index = 0; // failed so clear to default
 
     // sharing code with gemm
     if(BATCHED)

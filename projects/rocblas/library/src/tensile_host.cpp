@@ -1232,7 +1232,7 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 
     bool solutionBased = algo == rocblas_gemm_algo_solution_index;
     bool hipBLASLtOnly = false, TensileOnly = false;
-    bool useDefaultSolution = rocblas_default_solution_index(solution_index);
+
     if(solutionBased)
     {
         hipBLASLtOnly = rocblas_hipblaslt_index(solution_index);
@@ -1294,6 +1294,7 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
             auto  handle        = prob.handle;
             auto* fitness_query = handle->get_solution_fitness_query();
 
+            bool useDefaultSolution = rocblas_default_solution_index(solution_index);
             if(solutionBased && !useDefaultSolution)
             {
                 rocblas_int tensile_idx = map_index_rocblas_to_tensile(solution_index);
@@ -1472,7 +1473,7 @@ rocblas_status getRocblasSolutions(const RocblasContractionProblem<Ti, To, Tc>& 
             else
             {
                 if(*list_size > 0 && arrayIdx < *list_size)
-                    list_array[arrayIdx] = GEMM_EX_GEMV_SOLUTION_IDX;
+                    list_array[arrayIdx] = c_rocblas_gemv_solution;
             }
         }
         else if(list_array == nullptr)
