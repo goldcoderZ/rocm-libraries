@@ -35,11 +35,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, 64u, 32, 2, 1, 2, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
 // clang-format on
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         return {__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
             bit_cast<int32x8_t>(aVec),
@@ -73,11 +70,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
 : amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, 64u, 32, 2, 1, 2, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
 // clang-format on
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         return {__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
             bit_cast<int32x8_t>(aVec),
@@ -111,20 +105,15 @@ struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, CtrlFlags, Compile
 : amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
 // clang-format on
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         int32x4_t arg_a = bit_cast<int32x4_t>(aVec);
         int32x4_t arg_b = bit_cast<int32x4_t>(bVec);
 
-        using arg_type = int32x8_t;
-
         return {__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
-            arg_type{arg_a[0], arg_a[1], arg_a[2], arg_a[3], 0, 0, 0, 0},
-            arg_type{arg_b[0], arg_b[1], arg_b[2], arg_b[3], 0, 0, 0, 0},
+            int32x8_t{arg_a[0], arg_a[1], arg_a[2], arg_a[3], 0, 0, 0, 0},
+            int32x8_t{arg_b[0], arg_b[1], arg_b[2], arg_b[3], 0, 0, 0, 0},
             cVec,
             scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
             scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
@@ -153,11 +142,8 @@ template <typename CtrlFlags, typename CompilerTarget>
 struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
 : amdgcn_mma_base<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         return {__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
             int32x8_t{aVec.data[0], aVec.data[1], aVec.data[2], aVec.data[3], aVec.data[4], aVec.data[5], 0, 0},
@@ -191,11 +177,8 @@ template <typename CtrlFlags, typename CompilerTarget>
 struct amdgcn_mma<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
 : amdgcn_mma_base<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         return {__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
             int32x8_t{aVec.data[0], aVec.data[1], aVec.data[2], aVec.data[3], aVec.data[4], aVec.data[5], 0, 0},
@@ -230,11 +213,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u, 64u, 32, 2, 1, 2, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
 // clang-format on
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         return {__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
             bit_cast<int32x8_t>(aVec),
@@ -268,11 +248,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u, CtrlFlags, CompilerTarget
 : amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u, 64u, 32, 2, 1, 2, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
 // clang-format on
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         return {__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
             bit_cast<int32x8_t>(aVec),
@@ -306,20 +283,15 @@ struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u, CtrlFlags, Compiler
 : amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
 // clang-format on
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         int32x4_t arg_a = bit_cast<int32x4_t>(aVec);
         int32x4_t arg_b = bit_cast<int32x4_t>(bVec);
 
-        using arg_type = int32x8_t;
-
         return {__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-            arg_type{arg_a[0], arg_a[1], arg_a[2], arg_a[3], 0, 0, 0, 0},
-            arg_type{arg_b[0], arg_b[1], arg_b[2], arg_b[3], 0, 0, 0, 0},
+            int32x8_t{arg_a[0], arg_a[1], arg_a[2], arg_a[3], 0, 0, 0, 0},
+            int32x8_t{arg_b[0], arg_b[1], arg_b[2], arg_b[3], 0, 0, 0, 0},
             cVec,
             scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
             scale::detail::ScaleDataTypeToFlag_v<pk_fp4_t>,
@@ -348,11 +320,8 @@ template <typename CtrlFlags, typename CompilerTarget>
 struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 32u, 32u, 64u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
 : amdgcn_mma_base<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         return {__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
             int32x8_t{aVec.data[0], aVec.data[1], aVec.data[2], aVec.data[3], aVec.data[4], aVec.data[5], 0, 0},
@@ -386,11 +355,8 @@ template <typename CtrlFlags, typename CompilerTarget>
 struct amdgcn_mma<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 32u, 32u, 64u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
 : amdgcn_mma_base<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
 {
-    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
-                                        BVecType const& bVec,
-                                        CVecType const& cVec,
-                                        int const& scale_A,
-                                        int const& scale_B)
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
         return {__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
             int32x8_t{aVec.data[0], aVec.data[1], aVec.data[2], aVec.data[3], aVec.data[4], aVec.data[5], 0, 0},
