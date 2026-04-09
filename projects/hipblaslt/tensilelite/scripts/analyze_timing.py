@@ -89,8 +89,8 @@ TIMING_HIERARCHY = {
             "pre_problem": {
                 "cpu_data_init": {},
                 "cpu_reference_gemm": {
-                    "solve_cpu_fast_f32": {},
-                    "solve_cpu_templates": {},
+                    "solve_cpu_fast": {},
+                    "solve_cpu_slow": {},
                 },
             },
             "validate_warmups": {

@@ -966,11 +966,7 @@ namespace TensileLite
             return multiply<Accumulator, MathOpAccum>(aVal, bVal);
         }
 
-        // Solve combinations of f16, bf16, f32 gemm problems using efficient CPU code.
-        // This versions only solves for a subset of geometries. The set of geometries
-        // supported should be extended as new bottlenecks in validation are discovered.
-        bool solveCPUFastInF32(ContractionProblemGemm const& problem,
-                               ContractionInputs const&      inputs)
+        bool isFastPathEligible(ContractionProblemGemm const& problem)
         {
 
             // For more precise numerical correctness with XFloat32, skip this fast path.
@@ -987,8 +983,6 @@ namespace TensileLite
                 return rejectFast("XFloat32");
             }
 
-            // Guard rails to check that the fast path is appropriate to use.
-            // Some of these can be relaxed  as support on this path is generalized.
             auto isSupportedType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
                        || t == rocisa::DataType::BFloat16;
@@ -1047,6 +1041,43 @@ namespace TensileLite
                 return rejectFast("multi_index");
             }
 
+            // Layout validation — index accesses are safe because the
+            // index-structure check above verified exactly 1 element in each.
+            size_t indexMA = problem.freeIndicesA()[0].i;
+            size_t indexKA = problem.boundIndices()[0].a;
+            size_t indexNB = problem.freeIndicesB()[0].i;
+            size_t indexKB = problem.boundIndices()[0].b;
+            size_t indexMD = problem.freeIndices()[0].d;
+
+            size_t strideMA = problem.a().strides()[indexMA];
+            size_t strideKA = problem.a().strides()[indexKA];
+            size_t strideNB = problem.b().strides()[indexNB];
+            size_t strideKB = problem.b().strides()[indexKB];
+
+            bool isPackedA = (strideMA == 1 || strideKA == 1);
+            bool isPackedB = (strideNB == 1 || strideKB == 1);
+            bool isPackedD = (problem.d().strides()[indexMD] == 1);
+            if(!isPackedA || !isPackedB || !isPackedD)
+            {
+                return rejectFast("layout");
+            }
+
+            return true;
+        }
+
+        // Solve combinations of f16, bf16, f32 gemm problems using efficient CPU code.
+        // This function assumes the problem is eligible for the fast path — callers
+        // must check isFastPathEligible() first.
+        void solveCPUFastInF32(ContractionProblemGemm const& problem,
+                               ContractionInputs const&      inputs)
+        {
+            if(!isFastPathEligible(problem))
+            {
+                throw std::runtime_error(
+                    "solveCPUFastInF32 called on an ineligible problem. "
+                    "Callers must check isFastPathEligible() first.");
+            }
+
             bool               doActivation = false;
             std::vector<float> actArgs;
             if(problem.activationType() != ActivationType::None)
@@ -1068,18 +1099,6 @@ namespace TensileLite
             size_t strideKA = problem.a().strides()[indexKA];
             size_t strideNB = problem.b().strides()[indexNB];
             size_t strideKB = problem.b().strides()[indexKB];
-
-            // Layout validation
-            bool isPackedA = (strideMA == 1 || strideKA == 1);
-            bool isPackedB = (strideNB == 1 || strideKB == 1);
-            bool isPackedD = (problem.d().strides()[indexMD] == 1);
-            if(!isPackedA || !isPackedB || !isPackedD)
-            {
-                return rejectFast("layout");
-            }
-
-            // Timing only for accepted fast-path work (not for FAST_PATH_REJECT cases above).
-            ScopedTimer solveCpuFastF32Timer("solve_cpu_fast_f32");
 
             size_t indexND  = problem.freeIndices()[1].d;
             size_t strideND = problem.d().strides()[indexND];
@@ -1346,7 +1365,6 @@ namespace TensileLite
                     inputs.d, shadowD, problem.d().totalAllocatedElements());
             }
 
-            return true;
         }
 
         template <typename Inputs, typename Accumulator, typename MathOpAccum>
@@ -2487,13 +2505,15 @@ namespace TensileLite
                 isDenseEnoughForFastPath = false;
             }
 
-            if(tryFastPath && isDenseEnoughForFastPath && solveCPUFastInF32(problem, inputs))
+            if(tryFastPath && isDenseEnoughForFastPath && isFastPathEligible(problem))
             {
+                ScopedTimer timer("solve_cpu_fast");
+                solveCPUFastInF32(problem, inputs);
                 return;
             }
 
             {
-                ScopedTimer timer("solve_cpu_templates");
+                ScopedTimer timer("solve_cpu_slow");
                 auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
                 SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
             }
