@@ -55,6 +55,7 @@ if(TARGET roc::mxDataGenerator)
             "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/include"
     )
     target_link_libraries(tensilelite-tests PRIVATE roc::mxDataGenerator)
+    target_compile_definitions(tensilelite-tests PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
     set_target_properties(tensilelite-tests
         PROPERTIES
         CXX_STANDARD 20
@@ -196,3 +197,65 @@ foreach(PATH fast slow)
         )
     endforeach()
 endforeach()
+
+#################################################
+#        FP4 / MX Scale tests (slow path only)  #
+#################################################
+if(NOT WIN32)
+    # M/N similar to f32 tests; K must be a multiple of mxBlock (32).
+    set(F4_SIZES_32 -M 133 -N 147 -K 160)
+    set(F4_SIZES_64 -M 133 -N 147 -K 192)
+
+    # Basic F4 with MX scaling, all transpose combos
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(slow_f4_MX32_${TRANS}
+            ARGS ${F4_SIZES_32} ${TFLAGS} --type f4 --mxBlock 32 --validate
+        )
+        add_cpu_gemm_test(slow_f4_MX32_K192_${TRANS}
+            ARGS ${F4_SIZES_64} ${TFLAGS} --type f4 --mxBlock 32 --validate
+        )
+    endforeach()
+
+    # F4 without MX (mxBlock=0, the default)
+    add_cpu_gemm_test(slow_f4_NoMX_NN
+        ARGS -M 16 -N 16 -K 16 --type f4 --validate
+    )
+
+    # F4 + MX + epilogue features
+    add_cpu_gemm_test(slow_f4_MX32_Bias
+        ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --bias
+    )
+    add_cpu_gemm_test(slow_f4_MX32_Relu
+        ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --activation relu
+    )
+    add_cpu_gemm_test(slow_f4_MX32_ScaleAlphaVec
+        ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --scaleAlphaVec
+    )
+    add_cpu_gemm_test(slow_f4_MX32_AllFeatures
+        ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --bias --activation relu --scaleAlphaVec
+    )
+    add_cpu_gemm_test(slow_f4_MX32_Beta
+        ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --beta 1.0 --validate
+    )
+
+    # F4 + MX + ScaleAB
+    foreach(MODE Scalar Vector)
+        add_cpu_gemm_test(slow_f4_MX32_ScaleAB_${MODE}
+            ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --useScaleAB ${MODE}
+        )
+    endforeach()
+
+    # Negative tests: invalid K/mxBlock combos should fail with clear error
+    add_test(
+        NAME "CPUGemm.slow_f4_MX32_BadK_Unaligned"
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 33 --type f4 --mxBlock 32 --validate
+    )
+    set_tests_properties("CPUGemm.slow_f4_MX32_BadK_Unaligned" PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME "CPUGemm.slow_f4_MX32_BadK_TooSmall"
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --type f4 --mxBlock 32 --validate
+    )
+    set_tests_properties("CPUGemm.slow_f4_MX32_BadK_TooSmall" PROPERTIES WILL_FAIL TRUE)
+endif()
