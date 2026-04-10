@@ -150,27 +150,19 @@ namespace
                          ActivationType activation    = ActivationType::None,
                          const float*   scaleAVec     = nullptr,
                          const float*   scaleBVec     = nullptr,
-                         int            factorDim     = 0,
+                         int            factorDim     = 0
 #ifndef _WIN32
+                         ,
                          const MXScale* mxScaleA      = nullptr,
                          const MXScale* mxScaleB      = nullptr,
-#else
-                         const void*    mxScaleA      = nullptr,
-                         const void*    mxScaleB      = nullptr,
+                         int            mxBlock       = 0
 #endif
-                         int            mxBlock       = 0)
+                         )
     {
         size_t strideAK = transA ? 1 : m;
         size_t strideAM = transA ? k : 1;
         size_t strideBK = transB ? n : 1;
         size_t strideBN = transB ? 1 : k;
-
-        // MX scale tensor layout (column-major, tight strides):
-        //   !transA: mxsa = {m, k/mxBlock}, idx = row + block * m
-        //    transA: mxsa = {k/mxBlock, m}, idx = block + row * (k/mxBlock)
-        //   !transB: mxsb = {k/mxBlock, n}, idx = block + col * (k/mxBlock)
-        //    transB: mxsb = {n, k/mxBlock}, idx = col + block * n
-        size_t kBlocks = (mxBlock > 0) ? k / static_cast<size_t>(mxBlock) : 0;
 
         for(size_t i = 0; i < m; i++)
         {
@@ -179,8 +171,16 @@ namespace
                 float sum = 0.0f;
 
 #ifndef _WIN32
+                // MX scale tensor layout (column-major, tight strides):
+                //   !transA: mxsa = {m, k/mxBlock}, idx = row + block * m
+                //    transA: mxsa = {k/mxBlock, m}, idx = block + row * (k/mxBlock)
+                //   !transB: mxsb = {k/mxBlock, n}, idx = block + col * (k/mxBlock)
+                //    transB: mxsb = {n, k/mxBlock}, idx = col + block * n
+                // These formulas assume the same column-major tight-packed layout
+                // produced by setMXScaleA/setMXScaleB in ContractionProblem.
                 if(mxBlock > 0 && mxScaleA && mxScaleB)
                 {
+                    size_t kBlocks = k / static_cast<size_t>(mxBlock);
                     for(size_t blk = 0; blk < kBlocks; blk++)
                     {
                         float blockSum = 0.0f;
@@ -283,6 +283,12 @@ int runGemm(size_t         m,
     {
         if(mxBlock > 0)
         {
+            if((mxBlock & (mxBlock - 1)) != 0)
+            {
+                std::cerr << "Error: mxBlock (" << mxBlock << ") must be a power of 2"
+                          << std::endl;
+                return 1;
+            }
             if(k < static_cast<size_t>(mxBlock))
             {
                 std::cerr << "Error: K (" << k << ") must be >= mxBlock (" << mxBlock << ")"
@@ -556,15 +562,14 @@ int runGemm(size_t         m,
                         activation,
                         (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
                         (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
-                        factorDim,
+                        factorDim
 #ifndef _WIN32
+                        ,
                         (isFP4 && mxBlock > 0) ? mxsa.data() : nullptr,
                         (isFP4 && mxBlock > 0) ? mxsb.data() : nullptr,
-#else
-                        nullptr,
-                        nullptr,
+                        mxBlock
 #endif
-                        mxBlock);
+                        );
 
         // Compare results — FP4 with MX scales needs wider tolerance
         float tolerance = isFP4 ? 0.5f : 0.05f;
@@ -660,6 +665,18 @@ int main(int argc, char* argv[])
     int         factorDim        = vm["factorDim"].as<int>();
     std::string useScaleAB       = vm["useScaleAB"].as<std::string>();
     int         mxBlock          = vm["mxBlock"].as<int>();
+
+    if(mxBlock < 0)
+    {
+        std::cerr << "Error: mxBlock (" << mxBlock << ") must be non-negative" << std::endl;
+        return 1;
+    }
+
+    if(mxBlock > 0 && typeStr != "f4")
+    {
+        std::cerr << "Error: mxBlock is only supported for type f4, not " << typeStr << std::endl;
+        return 1;
+    }
 
     if(useScaleAB != "none" && useScaleAB != "Scalar" && useScaleAB != "Vector")
     {

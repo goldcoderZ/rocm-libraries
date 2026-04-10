@@ -259,6 +259,11 @@ if(NOT WIN32)
         ARGS ${F4_SIZES_32} --type f4 --mxBlock 16 --validate --tryFastPath
     )
 
+    # F4 with odd dimensions (M*K is odd) to exercise ShadowBuffer edge cases
+    add_cpu_gemm_test(fast_f4_NoMX_OddDims
+        ARGS -M 3 -N 5 -K 7 --type f4 --validate --tryFastPath
+    )
+
     # Negative tests: invalid K/mxBlock combos should fail with clear error
     add_test(
         NAME "CPUGemm.slow_f4_MX32_BadK_Unaligned"
@@ -271,6 +276,20 @@ if(NOT WIN32)
         COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --type f4 --mxBlock 32 --validate
     )
     set_tests_properties("CPUGemm.slow_f4_MX32_BadK_TooSmall" PROPERTIES WILL_FAIL TRUE)
+
+    # Negative test: non-power-of-2 mxBlock should be rejected
+    add_test(
+        NAME "CPUGemm.slow_f4_MX6_BadPow2"
+        COMMAND cpu-gemm-driver -M 4 -N 4 -K 12 --type f4 --mxBlock 6 --validate
+    )
+    set_tests_properties("CPUGemm.slow_f4_MX6_BadPow2" PROPERTIES WILL_FAIL TRUE)
+
+    # Negative test: mxBlock with non-FP4 types should be rejected
+    add_test(
+        NAME "CPUGemm.slow_f32_MX32_Rejected"
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 32 --type f32 --mxBlock 32 --validate
+    )
+    set_tests_properties("CPUGemm.slow_f32_MX32_Rejected" PROPERTIES WILL_FAIL TRUE)
 endif()
 
 #################################################

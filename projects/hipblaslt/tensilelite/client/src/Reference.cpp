@@ -101,15 +101,16 @@ namespace TensileLite
                 else if(type == rocisa::DataType::Float4)
                 {
                     // Dense, lane-contiguous FP4 packing: N logical elements
-                    // stored in N/2 Float4x2 words. One intrinsic call per word.
+                    // stored in (N+1)/2 Float4x2 words. One intrinsic call per word.
                     m_storage.resize(N);
                     const Float4x2* fp4 = static_cast<const Float4x2*>(ptr);
-                    for(size_t w = 0; w < N / 2; ++w)
+                    for(size_t w = 0; w < (N + 1) / 2; ++w)
                     {
-                        auto v                = __amd_cvt_fp4x2_to_floatx2_scale(
+                        auto v           = __amd_cvt_fp4x2_to_floatx2_scale(
                             fp4[w].data, __AMD_OCP_E2M1, 0);
-                        m_storage[2 * w]     = v.x;
-                        m_storage[2 * w + 1] = v.y;
+                        m_storage[2 * w] = v.x;
+                        if(2 * w + 1 < N)
+                            m_storage[2 * w + 1] = v.y;
                     }
                     m_ptr = m_storage.data();
                 }
@@ -1060,12 +1061,13 @@ namespace TensileLite
             constexpr size_t FAST_BLOCK_K = 8;
             size_t mxBlockA    = problem.mxBlockA();
             size_t mxBlockB    = problem.mxBlockB();
-            size_t innerMXLoop = std::max(mxBlockA, mxBlockB);
 
-            if(innerMXLoop > 0)
+            if(mxBlockA > 0 || mxBlockB > 0)
             {
-                if(innerMXLoop % FAST_BLOCK_K != 0)
-                    return rejectFast("mx_block_not_aligned_to_BLOCK_K");
+                if(mxBlockA > 0 && mxBlockA % FAST_BLOCK_K != 0)
+                    return rejectFast("mxBlockA_not_aligned_to_BLOCK_K");
+                if(mxBlockB > 0 && mxBlockB % FAST_BLOCK_K != 0)
+                    return rejectFast("mxBlockB_not_aligned_to_BLOCK_K");
 
                 size_t sizeK = problem.boundSize(0);
                 if(mxBlockA > 0 && sizeK % mxBlockA != 0)
@@ -1238,7 +1240,7 @@ namespace TensileLite
             // MX block-scaling metadata (FP4 with MX)
             size_t         mxBlockA    = problem.mxBlockA();
             size_t         mxBlockB    = problem.mxBlockB();
-            size_t         innerMXLoop = std::max(mxBlockA, mxBlockB);
+            bool           hasMX       = (mxBlockA > 0) || (mxBlockB > 0);
             const MXScale* mxsaPtr
                 = (mxBlockA > 0) ? static_cast<const MXScale*>(inputs.mxsa) : nullptr;
             const MXScale* mxsbPtr
@@ -1246,7 +1248,7 @@ namespace TensileLite
             size_t strideMxsaM = 0, strideMxsaBlk = 0;
             size_t strideMxsbN = 0, strideMxsbBlk = 0;
             size_t strideBatchMxsa = 0, strideBatchMxsb = 0;
-            if(innerMXLoop > 0)
+            if(hasMX)
             {
                 if(mxBlockA > 0)
                 {
@@ -1260,7 +1262,7 @@ namespace TensileLite
                     strideMxsbN   = problem.mxsb().strides()[indexNB];
                     strideMxsbBlk = problem.mxsb().strides()[indexKB];
                     strideBatchMxsb
-                        = problem.mxsb().strides()[problem.batchIndices()[0].a];
+                        = problem.mxsb().strides()[problem.batchIndices()[0].b];
                 }
             }
 
@@ -1361,29 +1363,27 @@ namespace TensileLite
                             }
                         };
 
-                        if(innerMXLoop > 0)
+                        if(hasMX)
                         {
-                            size_t mxBlocks       = sizeK / innerMXLoop;
-                            size_t tilesPerMxBlock = innerMXLoop / BLOCK_K;
-
-                            for(size_t mxBlk = 0; mxBlk < mxBlocks; ++mxBlk)
+                            // Iterate per BLOCK_K tile and apply MX scales
+                            // per tile. Each mxBlock is a multiple of BLOCK_K
+                            // (enforced by isFastPathEligible), so all k values
+                            // within a tile share the same scale. This correctly
+                            // handles asymmetric mxBlockA != mxBlockB.
+                            for(size_t k = 0; k < kTiles; ++k)
                             {
+                                auto k0 = k * BLOCK_K;
+                                loadATile(k0);
+                                loadBTile(k0);
+
                                 std::array<float, BLOCK_M * BLOCK_N> tilePartial = {0};
+                                innerReduction(
+                                    aReg.data(), bReg.data(), tilePartial.data());
 
-                                for(size_t kt = 0; kt < tilesPerMxBlock; ++kt)
-                                {
-                                    auto k0 = mxBlk * innerMXLoop + kt * BLOCK_K;
-                                    loadATile(k0);
-                                    loadBTile(k0);
-                                    innerReduction(
-                                        aReg.data(), bReg.data(), tilePartial.data());
-                                }
-
-                                size_t kOuter = mxBlk * innerMXLoop;
                                 size_t mxsaI
-                                    = (mxBlockA > 0) ? kOuter / mxBlockA : 0;
+                                    = (mxBlockA > 0) ? k0 / mxBlockA : 0;
                                 size_t mxsbI
-                                    = (mxBlockB > 0) ? kOuter / mxBlockB : 0;
+                                    = (mxBlockB > 0) ? k0 / mxBlockB : 0;
 
                                 for(size_t mm = 0; mm < BLOCK_M; ++mm)
                                 {
