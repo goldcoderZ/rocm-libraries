@@ -131,25 +131,32 @@ namespace
     // Calculates D = activation(alpha * scaleA[i] * scaleB[j] * scaleAlphaVec[d] * (A * B) + beta * C + bias[i])
     // where d = i (row/M) when factorDim==0, or d = j (col/N) when factorDim==1.
     //
+    // Template parameters:
+    //   AccumT       — accumulation type (float or double)
+    //   MathOpAccumT — math-operation precision type. When different from AccumT,
+    //                  each A/B element is cast through MathOpAccumT before multiply
+    //                  (e.g. XFloat32 truncates mantissa to 10 bits).
+    //
     // When mxBlock > 0 and mxScaleA/mxScaleB are non-null, the K-reduction is
     // block-structured: accumulate mxBlock products, then scale by the MX
     // scale factors before adding to the running sum.
-    void columnMajorGemm(const float*   a,
-                         const float*   b,
-                         const float*   c,
-                         float*         d,
+    template <typename AccumT = float, typename MathOpAccumT = AccumT>
+    void columnMajorGemm(const AccumT*  a,
+                         const AccumT*  b,
+                         const AccumT*  c,
+                         AccumT*        d,
                          size_t         m,
                          size_t         n,
                          size_t         k,
                          bool           transA,
                          bool           transB,
-                         float          alpha,
-                         float          beta,
-                         const float*   biasVec       = nullptr,
-                         const float*   scaleAlphaVec = nullptr,
+                         AccumT         alpha,
+                         AccumT         beta,
+                         const AccumT*  biasVec       = nullptr,
+                         const AccumT*  scaleAlphaVec = nullptr,
                          ActivationType activation    = ActivationType::None,
-                         const float*   scaleAVec     = nullptr,
-                         const float*   scaleBVec     = nullptr,
+                         const AccumT*  scaleAVec     = nullptr,
+                         const AccumT*  scaleBVec     = nullptr,
                          int            factorDim     = 0
 #ifndef _WIN32
                          ,
@@ -168,7 +175,7 @@ namespace
         {
             for(size_t j = 0; j < n; j++)
             {
-                float sum = 0.0f;
+                AccumT sum = AccumT(0);
 
 #ifndef _WIN32
                 // MX scale tensor layout (column-major, tight strides):
@@ -183,14 +190,15 @@ namespace
                     size_t kBlocks = k / static_cast<size_t>(mxBlock);
                     for(size_t blk = 0; blk < kBlocks; blk++)
                     {
-                        float blockSum = 0.0f;
-                        size_t lBase   = blk * static_cast<size_t>(mxBlock);
+                        AccumT blockSum = AccumT(0);
+                        size_t lBase    = blk * static_cast<size_t>(mxBlock);
                         for(size_t t = 0; t < static_cast<size_t>(mxBlock); t++)
                         {
                             size_t l    = lBase + t;
-                            float  aVal = a[i * strideAM + l * strideAK];
-                            float  bVal = b[l * strideBK + j * strideBN];
-                            blockSum += aVal * bVal;
+                            AccumT aVal = a[i * strideAM + l * strideAK];
+                            AccumT bVal = b[l * strideBK + j * strideBN];
+                            blockSum += AccumT(MathOpAccumT(aVal))
+                                      * AccumT(MathOpAccumT(bVal));
                         }
 
                         size_t mxsaIdx = transA ? (blk + i * kBlocks)
@@ -198,8 +206,8 @@ namespace
                         size_t mxsbIdx = transB ? (j + blk * n)
                                                 : (blk + j * kBlocks);
 
-                        float mxScale = static_cast<float>(mxScaleA[mxsaIdx])
-                                      * static_cast<float>(mxScaleB[mxsbIdx]);
+                        AccumT mxScale = static_cast<AccumT>(mxScaleA[mxsaIdx])
+                                       * static_cast<AccumT>(mxScaleB[mxsbIdx]);
                         sum += blockSum * mxScale;
                     }
                 }
@@ -208,13 +216,13 @@ namespace
                 {
                     for(size_t l = 0; l < k; l++)
                     {
-                        float aVal = a[i * strideAM + l * strideAK];
-                        float bVal = b[l * strideBK + j * strideBN];
-                        sum += aVal * bVal;
+                        AccumT aVal = a[i * strideAM + l * strideAK];
+                        AccumT bVal = b[l * strideBK + j * strideBN];
+                        sum += AccumT(MathOpAccumT(aVal)) * AccumT(MathOpAccumT(bVal));
                     }
                 }
 
-                float effectiveAlpha = alpha;
+                AccumT effectiveAlpha = alpha;
                 if(scaleAVec)
                     effectiveAlpha *= scaleAVec[i];
                 if(scaleBVec)
@@ -222,14 +230,14 @@ namespace
                 if(scaleAlphaVec)
                     effectiveAlpha *= scaleAlphaVec[factorDim == 0 ? i : j];
 
-                float result = effectiveAlpha * sum + beta * c[i + j * m];
+                AccumT result = effectiveAlpha * sum + beta * c[i + j * m];
 
                 if(biasVec)
                     result += biasVec[i];
 
                 if(activation == ActivationType::Relu)
                 {
-                    result = std::max(0.0f, result);
+                    result = std::max(AccumT(0), result);
                 }
                 else
                 {
