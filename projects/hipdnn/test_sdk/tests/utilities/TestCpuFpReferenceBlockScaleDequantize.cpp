@@ -328,6 +328,18 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, ScaleRankExceedsXRank)
         std::invalid_argument);
 }
 
+TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, ScaleRankLessThanXRank)
+{
+    // Scale tensor has fewer dimensions than x — should throw (no broadcast support)
+    const Tensor<float> xTensor({2, 4});
+    const Tensor<float> scaleTensor({2});
+    Tensor<float> yTensor({2, 4});
+
+    EXPECT_THROW(
+        CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false),
+        std::invalid_argument);
+}
+
 TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, ScaleDimMismatch)
 {
     // X: 1x4 with block_size=2 expects scale dims {1, 2}, but scale is {1, 3}

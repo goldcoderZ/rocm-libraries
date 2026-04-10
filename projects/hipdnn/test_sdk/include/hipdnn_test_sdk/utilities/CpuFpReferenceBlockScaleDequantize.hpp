@@ -50,11 +50,12 @@ public:
         }
 
         // Validate scale dimensions are consistent with data dims and block size.
-        if(scaleDims.size() > xDims.size())
+        // Scale must have the same rank as x — there is no dim-mapping for broadcast.
+        if(scaleDims.size() != xDims.size())
         {
             throw std::invalid_argument(
                 "BlockScaleDequantize: scale tensor rank (" + std::to_string(scaleDims.size())
-                + ") must not exceed input tensor rank (" + std::to_string(xDims.size()) + ").");
+                + ") must equal input tensor rank (" + std::to_string(xDims.size()) + ").");
         }
 
         for(size_t d = 0; d < scaleDims.size(); ++d)
