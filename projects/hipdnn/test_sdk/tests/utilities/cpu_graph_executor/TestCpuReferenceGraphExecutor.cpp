@@ -317,11 +317,10 @@ public:
     }
 
     template <typename XType, typename ScaleType>
-    static void
-        runBlockScaleDequantizeTest(hipdnn_data_sdk::data_objects::DataType xDataType,
-                                    hipdnn_data_sdk::data_objects::DataType scaleDataType,
-                                    hipdnn_data_sdk::data_objects::DataType yDataType,
-                                    hipdnn_data_sdk::data_objects::DataType computeDataType)
+    static void runBlockScaleDequantizeTest(hipdnn_data_sdk::data_objects::DataType xDataType,
+                                            hipdnn_data_sdk::data_objects::DataType scaleDataType,
+                                            hipdnn_data_sdk::data_objects::DataType yDataType,
+                                            hipdnn_data_sdk::data_objects::DataType computeDataType)
     {
         const std::vector<int64_t> xDims = {2, 32, 32, 64};
         const std::vector<int32_t> blockSize = {32};
@@ -530,8 +529,7 @@ TEST(TestCpuReferenceGraphExecutor, RMSNormAllFloats)
 }
 TEST(TestCpuReferenceGraphExecutor, RMSNormAllHalfs)
 {
-    TestCpuReferenceGraphExecutor::runRMSNormTest(
-        DataType::HALF, DataType::HALF, DataType::HALF);
+    TestCpuReferenceGraphExecutor::runRMSNormTest(DataType::HALF, DataType::HALF, DataType::HALF);
 }
 TEST(TestCpuReferenceGraphExecutor, RMSNormAllBFloat16)
 {

@@ -25,8 +25,7 @@ struct BlockScaleDequantizeTensorBundle
         : xTensor(xDims)
         , scaleTensor(scaleDims)
     {
-        xTensor.fillWithRandomValues(
-            static_cast<XType>(0.0f), static_cast<XType>(1.0f), seed);
+        xTensor.fillWithRandomValues(static_cast<XType>(0.0f), static_cast<XType>(1.0f), seed);
         scaleTensor.fillWithRandomValues(
             static_cast<ScaleType>(0.1f), static_cast<ScaleType>(2.0f), seed);
     }
@@ -48,13 +47,12 @@ struct BlockScaleDequantizeTensorBundle
 template <typename XType, typename ScaleType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
-    buildBlockScaleDequantizeGraph(
-        BlockScaleDequantizeTensorBundle<XType, ScaleType>& tensorBundle,
-        hipdnn_data_sdk::data_objects::DataType xDataType,
-        hipdnn_data_sdk::data_objects::DataType scaleDataType,
-        hipdnn_data_sdk::data_objects::DataType yDataType,
-        hipdnn_data_sdk::data_objects::DataType computeDataType,
-        const std::vector<int32_t>& blockSize)
+    buildBlockScaleDequantizeGraph(BlockScaleDequantizeTensorBundle<XType, ScaleType>& tensorBundle,
+                                   hipdnn_data_sdk::data_objects::DataType xDataType,
+                                   hipdnn_data_sdk::data_objects::DataType scaleDataType,
+                                   hipdnn_data_sdk::data_objects::DataType yDataType,
+                                   hipdnn_data_sdk::data_objects::DataType computeDataType,
+                                   const std::vector<int32_t>& blockSize)
 {
     using namespace hipdnn_tests::constants;
 
@@ -65,8 +63,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "x", hipdnn_frontend::fromSdkType(xDataType), tensorBundle.xTensor);
     xAttr.set_uid(K_BSD_TENSOR_X_UID);
-    auto xTensorAttr
-        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "scale", hipdnn_frontend::fromSdkType(scaleDataType), tensorBundle.scaleTensor);
