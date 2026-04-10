@@ -272,7 +272,8 @@ int runGemm(size_t         m,
             bool               useScaleAlphaVec,
             const std::string& useScaleAB,
             int                factorDim,
-            int                mxBlock = 0)
+            int                mxBlock = 0,
+            bool               isTF32  = false)
 {
     constexpr rocisa::DataType dtypeEnum = TypeTraits<InputT>::value;
 
@@ -342,6 +343,9 @@ int runGemm(size_t         m,
     contraction.setComputeInputTypeB(dtypeEnum);
     contraction.setAlphaType(rocisa::DataType::Float);
     contraction.setBetaType(rocisa::DataType::Float);
+
+    if(isTF32)
+        contraction.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
     // Allocate host memory for inputs and outputs
     size_t numA = m * k;
@@ -551,34 +555,46 @@ int runGemm(size_t         m,
         std::vector<float> cF32(c.begin(), c.end());
         std::vector<float> dRef(d.size());
 
-        // Run the golden reference
-        columnMajorGemm(aF32.data(),
-                        bF32.data(),
-                        cF32.data(),
-                        dRef.data(),
-                        m,
-                        n,
-                        k,
-                        transA,
-                        transB,
-                        (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha,
-                        beta,
-                        useBias ? biasVec.data() : nullptr,
-                        useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
-                        activation,
-                        (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
-                        (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
-                        factorDim
+        // Run the golden reference.
+        // When isTF32, use XFloat32 as MathOpAccumT so the golden ref
+        // truncates each A/B element to 10-bit mantissa before multiply.
+        auto runGoldenRef = [&](auto mathOpTag) {
+            using MathOpT = decltype(mathOpTag);
+            columnMajorGemm<float, MathOpT>(
+                aF32.data(),
+                bF32.data(),
+                cF32.data(),
+                dRef.data(),
+                m,
+                n,
+                k,
+                transA,
+                transB,
+                (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha,
+                beta,
+                useBias ? biasVec.data() : nullptr,
+                useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
+                activation,
+                (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
+                (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
+                factorDim
 #ifndef _WIN32
-                        ,
-                        (isFP4 && mxBlock > 0) ? mxsa.data() : nullptr,
-                        (isFP4 && mxBlock > 0) ? mxsb.data() : nullptr,
-                        mxBlock
+                ,
+                (isFP4 && mxBlock > 0) ? mxsa.data() : nullptr,
+                (isFP4 && mxBlock > 0) ? mxsb.data() : nullptr,
+                mxBlock
 #endif
-                        );
+            );
+        };
 
-        // Compare results — FP4 with MX scales needs wider tolerance
-        float tolerance = isFP4 ? 0.5f : 0.05f;
+        if(isTF32)
+            runGoldenRef(XFloat32{});
+        else
+            runGoldenRef(float{});
+
+        // Compare results — reduced-precision types need wider tolerance.
+        // TF32 loses 13 of 23 mantissa bits; errors accumulate over K.
+        float tolerance = isFP4 ? 0.5f : (isTF32 ? 1.0f : 0.05f);
 
         bool  allClose = true;
         float maxDiff  = 0.0f;
@@ -627,7 +643,7 @@ int main(int argc, char* argv[])
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type (f32, f16, bf16, f4, f8, bf8, f8fnuz, bf8fnuz)")(
+        "type", po::value<std::string>()->default_value("f32"), "Data type (f32, tf32, f16, bf16, f4, f8, bf8, f8fnuz, bf8fnuz)")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
         "tryFastPath", po::value<bool>()->default_value(false), "Use optimized path")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
@@ -706,7 +722,10 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k << " Type=" << typeStr
-              << " FastPath=" << tryFastPath << std::endl;
+              << " FastPath=" << tryFastPath;
+    if(typeStr == "tf32")
+        std::cout << " MathOp=XFloat32";
+    std::cout << std::endl;
 
     try
     {
@@ -715,6 +734,13 @@ int main(int argc, char* argv[])
             return runGemm<float>(
                 m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
                 useBias, activation, useScaleAlphaVec, useScaleAB, factorDim);
+        }
+        else if(typeStr == "tf32")
+        {
+            return runGemm<float>(
+                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
+                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
+                /*mxBlock=*/0, /*isTF32=*/true);
         }
         else if(typeStr == "bf16")
         {
