@@ -168,13 +168,13 @@ void run_benchmark(benchmark::State& state,
 
 template <class OpT>
 void add_benchmarks(
-  const std::string& algo_name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
+  const std::string& algo_name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
 {
   constexpr int entropy_reductions[] = {0, 4}; // 1.000, 0.201;
 
   for (int entropy_reduction : entropy_reductions)
   {
-    std::vector<benchmark::internal::Benchmark*> bs;
+    std::vector<benchmark::Benchmark*> bs;
     BENCHMARK_KEY_TYPE_ENTROPY(int8_t, entropy_reduction)
     BENCHMARK_KEY_TYPE_ENTROPY(int16_t, entropy_reduction)
     BENCHMARK_KEY_TYPE_ENTROPY(int32_t, entropy_reduction)

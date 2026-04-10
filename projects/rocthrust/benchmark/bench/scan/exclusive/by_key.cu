@@ -132,9 +132,9 @@ void run_benchmark(benchmark::State& state, const std::size_t elements, const st
 
 template <class Benchmark>
 void add_benchmarks(
-  const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
+  const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
 {
-  std::vector<benchmark::internal::Benchmark*> bs;
+  std::vector<benchmark::Benchmark*> bs;
   BENCHMARK_KEY_TYPE(int8_t)
   BENCHMARK_KEY_TYPE(int16_t)
   BENCHMARK_KEY_TYPE(int32_t)
@@ -164,7 +164,7 @@ int main(int argc, char* argv[])
   benchmark::AddCustomContext("seed", seed_type);
 
   // Add benchmark
-  std::vector<benchmark::internal::Benchmark*> benchmarks;
+  std::vector<benchmark::Benchmark*> benchmarks;
   add_benchmarks<by_key>("by_key", benchmarks, seed_type);
 
   // Use manual timing
