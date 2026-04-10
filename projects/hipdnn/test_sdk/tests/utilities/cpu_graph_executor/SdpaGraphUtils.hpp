@@ -24,6 +24,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("SdpaFwdTest");
+    graph->set_compute_data_type(frontendDataType);
 
     int64_t uid = 1;
     auto qAttr
