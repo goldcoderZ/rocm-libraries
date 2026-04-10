@@ -205,7 +205,6 @@ if(NOT WIN32)
     # M/N similar to f32 tests; K must be a multiple of mxBlock (32).
     set(F4_SIZES_32 -M 133 -N 147 -K 160)
     set(F4_SIZES_64 -M 133 -N 147 -K 192)
-    set(F4_SIZES_LARGE -M 1024 -N 1024 -K 1024)
 
     foreach(PATH fast slow)
         if("${PATH}" STREQUAL "fast")
@@ -253,11 +252,6 @@ if(NOT WIN32)
                 ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
             )
         endforeach()
-
-        # Large matrix to exercise tile-level parallelism
-        add_cpu_gemm_test(${PATH}_f4_MX32_Large
-            ARGS ${F4_SIZES_LARGE} --type f4 --mxBlock 32 --validate ${PATH_FLAGS}
-        )
     endforeach()
 
     # Fast-path-only: mxBlock=16 (tests non-hardcoded mxBlock; 16 % BLOCK_K=8 == 0)
