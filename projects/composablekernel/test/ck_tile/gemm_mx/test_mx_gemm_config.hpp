@@ -75,7 +75,7 @@ struct MxGemmConfig
     static constexpr ck_tile::index_t NumWaveGroups = 1;
     static constexpr bool DoubleSmemBuffer          = false;
     static constexpr bool Preshuffle                = false;
-    static constexpr bool UsePackedSizeInShuffleB   = false;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess = 16;
 
     static constexpr int N_Repeat          = N_Tile / N_Warp_Tile / N_Warp;
     static constexpr bool TiledMMAPermuteN = false;
@@ -90,12 +90,12 @@ struct MXfp4_GemmConfig16 : MxGemmConfig
 
 struct MXfp4_GemmConfig16_Preshuffle : MXfp4_GemmConfig16
 {
-    static constexpr ck_tile::index_t M_Tile      = 128;
-    static constexpr ck_tile::index_t N_Tile      = 512;
-    static constexpr ck_tile::index_t K_Tile      = 256;
-    static constexpr auto Scheduler               = ck_tile::GemmPipelineScheduler::Default;
-    static constexpr bool Preshuffle              = true;
-    static constexpr bool UsePackedSizeInShuffleB = true;
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 512;
+    static constexpr ck_tile::index_t K_Tile = 256;
+    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Default;
+    static constexpr bool Preshuffle         = true;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess = 32;
 };
 
 struct MXfp8_GemmConfig16 : MxGemmConfig
@@ -107,10 +107,9 @@ struct MXfp8_GemmConfig16 : MxGemmConfig
 
 struct MXfp8_GemmConfig16_Preshuffle : MXfp8_GemmConfig16
 {
-    static constexpr ck_tile::index_t M_Tile      = 128;
-    static constexpr ck_tile::index_t N_Tile      = 256;
-    static constexpr ck_tile::index_t K_Tile      = 256;
-    static constexpr auto Scheduler               = ck_tile::GemmPipelineScheduler::Default;
-    static constexpr bool Preshuffle              = true;
-    static constexpr bool UsePackedSizeInShuffleB = true;
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 256;
+    static constexpr ck_tile::index_t K_Tile = 256;
+    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Default;
+    static constexpr bool Preshuffle         = true;
 };

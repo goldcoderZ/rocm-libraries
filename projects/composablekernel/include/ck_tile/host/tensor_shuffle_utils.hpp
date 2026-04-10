@@ -7,16 +7,20 @@
 
 namespace ck_tile {
 namespace detail {
-template <typename GemmConfig, typename = void>
-struct shuffle_b_uses_packed_size : std::false_type
+template <typename GemmConfig, typename T, typename = void>
+struct b_contiguous_items_per_access
 {
+    // Default: 16 / sizeof(T)
+    static constexpr int value = 16 / static_cast<int>(sizeof(T));
 };
 
-template <typename GemmConfig>
-struct shuffle_b_uses_packed_size<GemmConfig,
-                                  std::void_t<decltype(GemmConfig::UsePackedSizeInShuffleB)>>
-    : std::bool_constant<GemmConfig::UsePackedSizeInShuffleB>
+template <typename GemmConfig, typename T>
+struct b_contiguous_items_per_access<GemmConfig,
+                                     T,
+                                     std::void_t<decltype(GemmConfig::BContiguousItemsPerAccess)>>
 {
+    // PackedSize specified
+    static constexpr int value = GemmConfig::BContiguousItemsPerAccess;
 };
 } // namespace detail
 
@@ -117,12 +121,9 @@ auto shuffle_b(const ck_tile::HostTensor<T>& t, GemmConfig)
     else
     {
         constexpr int KLane = ck_tile::get_warp_size() / GemmConfig::N_Warp_Tile;
-        constexpr int PackedSize =
-            detail::shuffle_b_uses_packed_size<GemmConfig>::value
-                ? ck_tile::numeric_traits<ck_tile::remove_cvref_t<T>>::PackedSize
-                : 1;
-        constexpr int ItemsPerAccess = std::min(16 * PackedSize / static_cast<int>(sizeof(T)),
-                                                GemmConfig::K_Warp_Tile / KLane);
+        constexpr int ItemsPerAccess =
+            std::min(detail::b_contiguous_items_per_access<GemmConfig, T>::value,
+                     GemmConfig::K_Warp_Tile / KLane);
 
         ck_tile::HostTensor<T> t_view({n_ / GemmConfig::N_Warp_Tile,
                                        GemmConfig::N_Warp_Tile,
@@ -183,12 +184,9 @@ auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmC
     else
     {
         constexpr int KLane = ck_tile::get_warp_size() / GemmConfig::N_Warp_Tile;
-        constexpr int PackedSize =
-            detail::shuffle_b_uses_packed_size<GemmConfig>::value
-                ? ck_tile::numeric_traits<ck_tile::remove_cvref_t<T>>::PackedSize
-                : 1;
-        constexpr int ItemsPerAccess = std::min(16 * PackedSize / static_cast<int>(sizeof(T)),
-                                                GemmConfig::K_Warp_Tile / KLane);
+        constexpr int ItemsPerAccess =
+            std::min(detail::b_contiguous_items_per_access<GemmConfig, T>::value,
+                     GemmConfig::K_Warp_Tile / KLane);
         ck_tile::HostTensor<T> t_view({n_ / gemmConfig.N_Tile,
                                        gemmConfig.N_Warp,
                                        gemmConfig.N_Warp_Tile,

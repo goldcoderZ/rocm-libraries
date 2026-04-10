@@ -17,18 +17,13 @@ template <typename ADataType_,
           typename CDataType_,
           typename BlockGemmShape_,
           typename Traits_,
-          GemmPipelineScheduler Scheduler_      = GemmPipelineScheduler::Intrawave,
-          typename AElementWise_                = ck_tile::element_wise::PassThrough,
-          typename BElementWise_                = ck_tile::element_wise::PassThrough,
-          bool HasHotLoop_                      = true,
-          TailNumber TailNum_                   = TailNumber::Full,
-          amd_buffer_coherence_enum BMemNTType_ = amd_buffer_coherence_enum::coherence_default,
-          bool BPreShufflePermute_              = false,
-          typename ComputeDataType_             = ADataType_,
-          bool FixedVectorSize_                 = false,
-          index_t VectorSizeA_                  = 1,
-          index_t VectorSizeB_                  = 1,
-          bool TiledMMAPermuteN_                = false>
+          GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
+          typename AElementWise_           = ck_tile::element_wise::PassThrough,
+          typename BElementWise_           = ck_tile::element_wise::PassThrough,
+          typename ComputeDataType_        = ADataType_,
+          bool FixedVectorSize_            = false,
+          index_t VectorSizeA_             = 1,
+          index_t VectorSizeB_             = 1>
 struct MXGemmPipelineProblem : UniversalGemmPipelineProblem<ADataType_,
                                                             BDataType_,
                                                             CDataType_,
@@ -42,34 +37,10 @@ struct MXGemmPipelineProblem : UniversalGemmPipelineProblem<ADataType_,
                                                             VectorSizeA_,
                                                             VectorSizeB_>
 {
-    using Base = UniversalGemmPipelineProblem<ADataType_,
-                                              BDataType_,
-                                              CDataType_,
-                                              BlockGemmShape_,
-                                              Traits_,
-                                              Scheduler_,
-                                              AElementWise_,
-                                              BElementWise_,
-                                              ComputeDataType_,
-                                              FixedVectorSize_,
-                                              VectorSizeA_,
-                                              VectorSizeB_>;
-
-    static constexpr bool Preshuffle = Base::Traits::Preshuffle;
-
     static constexpr int ScaleGranularityK = 32;
-
-    static constexpr int ContinuousKPerThread = 32;
-    static constexpr int MXdlPack             = 2;
-    static constexpr int NXdlPack             = 2;
-    static constexpr int KXdlPack             = 2;
-    static constexpr index_t flatKPerWarp     = get_warp_size() * ContinuousKPerThread;
-
-    static constexpr bool HasHotLoop                      = HasHotLoop_;
-    static constexpr TailNumber TailNum                   = TailNum_;
-    static constexpr amd_buffer_coherence_enum BMemNTType = BMemNTType_;
-    static constexpr bool BPreShufflePermute              = BPreShufflePermute_;
-    static constexpr bool TiledMMAPermuteN                = TiledMMAPermuteN_;
+    static constexpr int MXdlPack          = 2;
+    static constexpr int NXdlPack          = 2;
+    static constexpr int KXdlPack          = 2;
 };
 
 template <typename GemmConfig>
@@ -77,40 +48,6 @@ struct MXEpilogueTraits
 {
     static constexpr index_t BlockedXDLNPerWarp = GemmConfig::Preshuffle ? 2 : 1;
 };
-
-template <typename ADataType_,
-          typename BDataType_,
-          typename CDataType_,
-          typename BlockGemmShape_,
-          typename Traits_,
-          GemmPipelineScheduler Scheduler_      = GemmPipelineScheduler::Intrawave,
-          typename AElementWise_                = ck_tile::element_wise::PassThrough,
-          typename BElementWise_                = ck_tile::element_wise::PassThrough,
-          bool HasHotLoop_                      = true,
-          TailNumber TailNum_                   = TailNumber::Full,
-          amd_buffer_coherence_enum BMemNTType_ = amd_buffer_coherence_enum::coherence_default,
-          bool BPreShufflePermute_              = false,
-          typename ComputeDataType_             = ADataType_,
-          bool FixedVectorSize_                 = false,
-          index_t VectorSizeA_                  = 1,
-          index_t VectorSizeB_                  = 1>
-using MXGemmPreshufflePipelineProblem = MXGemmPipelineProblem<ADataType_,
-                                                              BDataType_,
-                                                              CDataType_,
-                                                              BlockGemmShape_,
-                                                              Traits_,
-                                                              Scheduler_,
-                                                              AElementWise_,
-                                                              BElementWise_,
-                                                              HasHotLoop_,
-                                                              TailNum_,
-                                                              BMemNTType_,
-                                                              BPreShufflePermute_,
-                                                              ComputeDataType_,
-                                                              FixedVectorSize_,
-                                                              VectorSizeA_,
-                                                              VectorSizeB_,
-                                                              true>;
 
 // This pipeline extends the existing universal GEMM machinery with preshuffled-B support.
 template <typename Problem, typename PipelinePolicy = MXGemmPipelineAgBgCrPolicy>

@@ -46,24 +46,18 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
     static_assert(sizeof(ComputeDataType) >= sizeof(BDataType),
                   "mixed_prec_gemm requires ADataType is a wider type than BDataType");
 
-    using MXPipelineProblem =
-        ck_tile::MXGemmPipelineProblem<ADataType,
-                                       BDataType,
-                                       AccDataType,
-                                       GemmShape,
-                                       MXGemmTraits,
-                                       GemmConfig::Scheduler,
-                                       ck_tile::element_wise::PassThrough,
-                                       ck_tile::element_wise::PassThrough,
-                                       true,
-                                       ck_tile::TailNumber::Full,
-                                       ck_tile::amd_buffer_coherence_enum::coherence_default,
-                                       false,
-                                       ADataType,
-                                       false,
-                                       1,
-                                       1,
-                                       GemmConfig::TiledMMAPermuteN>;
+    using MXPipelineProblem = ck_tile::MXGemmPipelineProblem<ADataType,
+                                                             BDataType,
+                                                             AccDataType,
+                                                             GemmShape,
+                                                             MXGemmTraits,
+                                                             GemmConfig::Scheduler,
+                                                             ck_tile::element_wise::PassThrough,
+                                                             ck_tile::element_wise::PassThrough,
+                                                             ADataType,
+                                                             false,
+                                                             1,
+                                                             1>;
 
     using MXGemmPipeline =
         std::conditional_t<GemmConfig::Preshuffle,
