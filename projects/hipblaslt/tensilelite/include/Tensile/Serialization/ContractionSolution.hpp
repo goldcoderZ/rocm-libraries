@@ -144,6 +144,8 @@ namespace TensileLite
                 iot::mapRequired(io, "DirectToLdsA", s.DirectToLdsA);
                 iot::mapRequired(io, "DirectToLdsB", s.DirectToLdsB);
                 iot::mapOptional(io, "LdsNumBytes", s.LdsNumBytes);
+                iot::mapOptional(io, "1LDSBuffer", s.OneLDSBuffer);
+                iot::mapOptional(io, "LDSTrInst", s.LDSTrInst);
             }
 
             const static bool flow = false;

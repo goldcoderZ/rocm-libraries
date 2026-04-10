@@ -632,7 +632,9 @@ class SizeMapping:
                  'VectorWidthB',
                  'LocalSplitU',
                  'DirectToLdsA',
-                 'DirectToLdsB'
+                 'DirectToLdsB',
+                 ('1LDSBuffer', 'OneLDSBuffer'),
+                 'LDSTrInst'
                  ]
 
     @classmethod
@@ -721,6 +723,8 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
+                   OneLDSBuffer             = int(d.get('1LDSBuffer', 0)),
+                   LDSTrInst                = bool(d.get('LDSTrInst', False)),
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
