@@ -63,3 +63,32 @@ if(TENSILELITE_ENABLE_HOST)
         add_subdirectory(tests)
     endif()
 endif()
+
+# Stage Python sources for TheRock CI pytest execution via artifact system.
+if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+    set(_tl_src "${CMAKE_CURRENT_SOURCE_DIR}")
+    set(_tl_dest "${CMAKE_INSTALL_DATADIR}/tensilelite-tests")
+
+    install(FILES
+        "${_tl_src}/pyproject.toml"
+        "${_tl_src}/uv.lock"
+        "${_tl_src}/pytest.ini"
+        DESTINATION "${_tl_dest}"
+    )
+    install(DIRECTORY "${_tl_src}/Tensile/"
+        DESTINATION "${_tl_dest}/Tensile"
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+        PATTERN ".tox" EXCLUDE
+    )
+    install(DIRECTORY "${_tl_src}/rocisa/"
+        DESTINATION "${_tl_dest}/rocisa"
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+        PATTERN "build" EXCLUDE
+    )
+    install(DIRECTORY "${_tl_src}/scripts/"
+        DESTINATION "${_tl_dest}/scripts"
+        PATTERN "__pycache__" EXCLUDE
+    )
+endif()
