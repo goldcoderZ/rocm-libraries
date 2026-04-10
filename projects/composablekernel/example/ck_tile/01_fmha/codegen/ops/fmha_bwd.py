@@ -1112,6 +1112,16 @@ def get_bwd_blobs(
                 cond &= deterministic == "f"
                 if not cond:
                     continue
+            # test.sh: batch+group deterministic minimal set
+            elif receipt == 5:
+                cond = dtype in ["fp16"]
+                cond &= bias in ["no"]
+                cond &= dropout in ["no"]
+                cond &= dpad == dvpad
+                cond &= deterministic == "t"
+                cond &= mode in ["group", "batch"]
+                if not cond:
+                    continue
             # PyTorch integration
             elif receipt == 4:
                 cond = dtype in ["fp16", "bf16"]

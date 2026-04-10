@@ -83,14 +83,34 @@ struct FmhaBwdWorkspaceManager
             return integer_least_multiple(sizeof(index_t) * num_cus, ALIGNMENT);
         return 0;
     }
+    // cu_wlo[num_cus+1]: precomputed w_lo for each CU; INT32_MAX if CU has no work.
+    // cu_wlo[num_cus] stores total_w, so cu_whi = min(cu_wlo[cu_id+1], total_w) is safe.
+    CK_TILE_HOST static size_t GetCuWloSize(const int num_cus)
+    {
+        if constexpr(kIsGroupMode && kIsDeterministic)
+            return integer_least_multiple(sizeof(index_t) * (num_cus + 1), ALIGNMENT);
+        return 0;
+    }
+    // cu_isplit[num_cus]: isplit for the first (batch,head) each CU touches; 0 if no work.
+    // All subsequent (batch,head) pairs have isplit=0 (CU always starts from beginning).
+    CK_TILE_HOST static size_t GetCuIsplitSize(const int num_cus)
+    {
+        if constexpr(kIsGroupMode && kIsDeterministic)
+            return integer_least_multiple(sizeof(index_t) * num_cus, ALIGNMENT);
+        return 0;
+    }
 
     template <bool kUseQrQtrDorPipeline>
     CK_TILE_HOST static size_t GetWorkspaceHostSize(const int batch)
     {
         if constexpr(kUseQrQtrDorPipeline)
             return 0;
-        return GetDqAccSplitsSize<kUseQrQtrDorPipeline>(batch) + GetDqAccOffsetsSize(batch) +
-               GetPrefixBatchSize(batch) + GetCuStartIbatchSize(get_num_cus());
+        const size_t raw = GetDqAccSplitsSize<kUseQrQtrDorPipeline>(batch) +
+                           GetDqAccOffsetsSize(batch) + GetPrefixBatchSize(batch) +
+                           GetCuStartIbatchSize(get_num_cus()) + GetCuWloSize(get_num_cus()) +
+                           GetCuIsplitSize(get_num_cus());
+        // Pad to 4K so dq_acc buffer always starts on a page-aligned boundary.
+        return integer_least_multiple(raw, static_cast<size_t>(4096));
     }
 
     CK_TILE_HOST static size_t GetDqAccSplitsOffset(const int) { return 0; }
@@ -106,6 +126,14 @@ struct FmhaBwdWorkspaceManager
     CK_TILE_HOST static size_t GetCuStartIbatchOffset(const int batch)
     {
         return GetPrefixBatchOffset(batch) + GetPrefixBatchSize(batch);
+    }
+    CK_TILE_HOST static size_t GetCuWloOffset(const int batch)
+    {
+        return GetCuStartIbatchOffset(batch) + GetCuStartIbatchSize(get_num_cus());
+    }
+    CK_TILE_HOST static size_t GetCuIsplitOffset(const int batch)
+    {
+        return GetCuWloOffset(batch) + GetCuWloSize(get_num_cus());
     }
     template <bool kUseQrQtrDorPipeline>
     CK_TILE_HOST static size_t GetDqAccDataOffset(const int batch)
@@ -158,6 +186,10 @@ struct FmhaBwdWorkspaceManager
             auto* cu_start_ibatch = reinterpret_cast<index_t*>(
                 reinterpret_cast<char*>(cpu_ws) + GetDqAccSplitsSize<false>(batch_size) +
                 GetDqAccOffsetsSize(batch_size) + GetPrefixBatchSize(batch_size));
+            auto* cu_wlo    = reinterpret_cast<index_t*>(reinterpret_cast<char*>(cpu_ws) +
+                                                         GetCuWloOffset(batch_size));
+            auto* cu_isplit = reinterpret_cast<index_t*>(reinterpret_cast<char*>(cpu_ws) +
+                                                         GetCuIsplitOffset(batch_size));
 
             prefix_batch[0] = 0;
             for(index_t b = 0; b < batch_size; ++b)
@@ -191,18 +223,42 @@ struct FmhaBwdWorkspaceManager
                 offsets[i] + static_cast<long_index_t>(nhead_q) * nsplits[i] *
                                  (seqstart_qs[i + 1] - seqstart_qs[i]) * hdim_q;
 
-            // Step 4: fill cu_start_ibatch via two-pointer scan O(batch + num_cus)
+            // Step 4: fill cu_start_ibatch, cu_wlo, cu_isplit via two-pointer scan
             index_t cu_lo = 0;
             for(index_t b = 0; b < batch_size; ++b)
             {
+                const index_t sq = seqstart_qs[b + 1] - seqstart_qs[b];
+                const index_t nc = integer_divide_ceil(seqstart_ks[b + 1] - seqstart_ks[b], kN0);
+                const index_t hw = nc * sq;
+                const index_t pb = prefix_batch[b];
                 const index_t cu_hi =
                     min(num_cus, integer_divide_ceil(prefix_batch[b + 1], target_w));
                 for(index_t c = cu_lo; c < cu_hi; ++c)
+                {
                     cu_start_ibatch[c] = b;
+                    const index_t w_lo = c * target_w;
+                    cu_wlo[c]          = w_lo;
+                    // isplit for first (batch,head) this CU touches
+                    if(hw > 0)
+                    {
+                        const index_t head_start =
+                            max(static_cast<index_t>((w_lo - pb) / hw), index_t(0));
+                        const index_t w_head  = pb + head_start * hw;
+                        const index_t wc_start = max(w_lo - w_head, index_t(0));
+                        cu_isplit[c] = wc_start > 0 ? integer_divide_ceil(wc_start, target_w) : 0;
+                    }
+                    else
+                        cu_isplit[c] = 0;
+                }
                 cu_lo = cu_hi;
             }
             for(index_t c = cu_lo; c < num_cus; ++c)
-                cu_start_ibatch[c] = batch_size; // sentinel: this CU has no work
+            {
+                cu_start_ibatch[c] = batch_size;
+                cu_wlo[c]          = std::numeric_limits<index_t>::max();
+                cu_isplit[c]       = 0;
+            }
+            cu_wlo[num_cus] = prefix_batch[batch_size]; // sentinel for w_hi of last active CU
 
             return sizeof(AccDataType) * dq_acc_elems;
         }
@@ -527,6 +583,8 @@ struct FmhaBwdDQDKDVKernel
         // group mode persistent scheduling tables (read from CPU workspace by GPU):
         const ck_tile::index_t* prefix_batch_ptr;    // prefix sum of nhead*hw[b], size [batch+1]
         const ck_tile::index_t* cu_start_ibatch_ptr; // first batch for each CU, size [num_cus]
+        const ck_tile::index_t* cu_wlo_ptr;    // precomputed w_lo per CU; INT32_MAX=no work
+        const ck_tile::index_t* cu_isplit_ptr; // isplit for first (batch,head) per CU; 0=no work
     };
 
     struct FmhaBwdBatchModeKargs
@@ -954,6 +1012,13 @@ struct FmhaBwdDQDKDVKernel
                 ws + WorkspaceManager::GetPrefixBatchOffset(batch));
             kargs.cu_start_ibatch_ptr = reinterpret_cast<const ck_tile::index_t*>(
                 ws + WorkspaceManager::GetCuStartIbatchOffset(batch));
+            if constexpr(kIsGroupMode)
+            {
+                kargs.cu_wlo_ptr = reinterpret_cast<const ck_tile::index_t*>(
+                    ws + WorkspaceManager::GetCuWloOffset(batch));
+                kargs.cu_isplit_ptr = reinterpret_cast<const ck_tile::index_t*>(
+                    ws + WorkspaceManager::GetCuIsplitOffset(batch));
+            }
         }
 
         return kargs;
@@ -1054,66 +1119,56 @@ struct FmhaBwdDQDKDVKernel
                 else
                 {
                     // Group mode persistent: variable seqlen per batch, dispatch via gist algo.
-                    // Each CU independently determines its workload interval using prefix_batch.
-                    const index_t cu_id  = blockIdx.x;
-                    const index_t num_cu = gridDim.x;
+                    // w_lo/w_hi are precomputed in PrepareWorkspaceHost; cu_wlo_ptr[cu_id] ==
+                    // INT32_MAX means this CU has no work.
+                    // Remap block→CU: interleave SEs so consecutive blocks hit different SEs,
+                    // spreading dq_acc writes across HBM channels.
+                    const index_t cu_id  = blockIdx.x / 8 + (blockIdx.x % 8) * 32;
                     const index_t nbatch = kargs.batch;
 
-                    // prefix_batch[nbatch] = total workload (nhead * sum(nc[b] * sq[b]))
-                    const index_t total_w = kargs.prefix_batch_ptr[nbatch];
-                    if(total_w == 0)
-                        return;
-                    const index_t target_w = integer_divide_ceil(total_w, num_cu);
-
-                    const index_t w_lo = amd_wave_read_first_lane(cu_id * target_w);
-                    const index_t w_hi = amd_wave_read_first_lane(
-                        min(static_cast<index_t>((cu_id + 1) * target_w), total_w));
-                    if(w_lo >= total_w)
+                    const index_t w_lo = amd_wave_read_first_lane(kargs.cu_wlo_ptr[cu_id]);
+                    if(w_lo == std::numeric_limits<index_t>::max())
                         return; // this CU has no work
+                    // cu_wlo[cu_id+1] is either next CU's w_lo or total_w (sentinel at [num_cus])
+                    const index_t w_hi = amd_wave_read_first_lane(kargs.cu_wlo_ptr[cu_id + 1]);
+
+                    // isplit for the first (batch,head) is precomputed; all subsequent are 0.
+                    index_t isplit = amd_wave_read_first_lane(kargs.cu_isplit_ptr[cu_id]);
 
                     for(index_t ibatch = kargs.cu_start_ibatch_ptr[cu_id]; ibatch < nbatch;
                         ++ibatch)
                     {
                         const index_t pb = kargs.prefix_batch_ptr[ibatch];
                         if(pb >= w_hi)
-                            break; // all remaining batches are past this CU's interval
+                            break;
 
-                        // per-batch seqlen: prefer seqlen_ptr if available, else diff seqstart
+                        // Use physical seqlen (seqstart diff) to match PrepareWorkspaceHost.
                         const index_t sq = amd_wave_read_first_lane(
-                            kargs.seqlen_q_ptr ? kargs.seqlen_q_ptr[ibatch]
-                                               : (kargs.seqstart_q_ptr[ibatch + 1] -
-                                                  kargs.seqstart_q_ptr[ibatch]));
+                            kargs.seqstart_q_ptr[ibatch + 1] - kargs.seqstart_q_ptr[ibatch]);
                         const index_t sk = amd_wave_read_first_lane(
-                            kargs.seqlen_k_ptr ? kargs.seqlen_k_ptr[ibatch]
-                                               : (kargs.seqstart_k_ptr[ibatch + 1] -
-                                                  kargs.seqstart_k_ptr[ibatch]));
+                            kargs.seqstart_k_ptr[ibatch + 1] - kargs.seqstart_k_ptr[ibatch]);
                         const index_t nc = integer_divide_ceil(sk, FmhaPipeline::kN0);
-                        const index_t hw = nc * sq; // workload per (batch, head) pair
+                        const index_t hw = nc * sq;
                         if(hw == 0)
                             continue;
                         const index_t nsplits_b =
                             amd_wave_read_first_lane(kargs.nsplits_ptr[ibatch]);
 
-                        // first head whose interval overlaps [w_lo, w_hi)
-                        const index_t head_start = max(static_cast<index_t>((w_lo - pb) / hw), 0);
-
-                        for(index_t head_idx = head_start; head_idx < kargs.nhead_q; ++head_idx)
+                        index_t head_idx = max(static_cast<index_t>((w_lo - pb) / hw), 0);
+                        for(; head_idx < kargs.nhead_q; ++head_idx)
                         {
-                            const index_t w_head = pb + head_idx * hw;
+                            const index_t w_head  = pb + head_idx * hw;
                             if(w_head >= w_hi)
-                                return; // remaining heads are past the interval
+                                return;
 
-                            // wc_start: workload offset of this CU's start relative to head start.
-                            // Used for both isplit and c_start.
                             const index_t wc_start = max(static_cast<index_t>(w_lo - w_head), 0);
-                            // isplit = rank of this CU among all CUs touching this head
-                            const index_t isplit = integer_divide_ceil(wc_start, target_w);
-                            const index_t c_start =
-                                wc_start > 0 ? integer_divide_ceil(wc_start, sq) : 0;
-                            const index_t c_end = integer_divide_ceil(min(hw, w_hi - w_head), sq);
+                            const index_t c_start  = max(integer_divide_ceil(wc_start, sq), 0);
+                            const index_t c_end    = integer_divide_ceil(min(hw, w_hi - w_head), sq);
 
                             for(index_t chunk_idx = c_start; chunk_idx < c_end; ++chunk_idx)
                                 run_(kargs, dim3(chunk_idx, head_idx, ibatch), isplit, nsplits_b);
+
+                            isplit = 0; // subsequent (batch,head) always start from beginning
                         }
                     }
                 }
