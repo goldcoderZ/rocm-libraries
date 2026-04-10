@@ -270,7 +270,6 @@ int runGemm(size_t         m,
                 return 1;
             }
         }
-        tryFastPath = false;
     }
 
     // Calculate strides assuming standard column-major packed storage

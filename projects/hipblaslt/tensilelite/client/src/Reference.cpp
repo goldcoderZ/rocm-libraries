@@ -97,6 +97,23 @@ namespace TensileLite
                     m_storage = loadToFloat<TensileLite::BFloat16>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
+#ifndef _WIN32
+                else if(type == rocisa::DataType::Float4)
+                {
+                    // Dense, lane-contiguous FP4 packing: N logical elements
+                    // stored in N/2 Float4x2 words. One intrinsic call per word.
+                    m_storage.resize(N);
+                    const Float4x2* fp4 = static_cast<const Float4x2*>(ptr);
+                    for(size_t w = 0; w < N / 2; ++w)
+                    {
+                        auto v                = __amd_cvt_fp4x2_to_floatx2_scale(
+                            fp4[w].data, __AMD_OCP_E2M1, 0);
+                        m_storage[2 * w]     = v.x;
+                        m_storage[2 * w + 1] = v.y;
+                    }
+                    m_ptr = m_storage.data();
+                }
+#endif
                 else
                 {
                     throw std::runtime_error("Unsupported type for ShadowBuffer");
@@ -983,14 +1000,25 @@ namespace TensileLite
                 return rejectFast("XFloat32");
             }
 
-            auto isSupportedType = [](rocisa::DataType t) {
+            auto isSupportedOutputType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
                        || t == rocisa::DataType::BFloat16;
             };
 
-            if(!isSupportedType(problem.a().dataType()) || !isSupportedType(problem.b().dataType())
-               || !isSupportedType(problem.c().dataType())
-               || !isSupportedType(problem.d().dataType()))
+            auto isSupportedInputType = [&](rocisa::DataType t) {
+                if(isSupportedOutputType(t))
+                    return true;
+#ifndef _WIN32
+                if(t == rocisa::DataType::Float4)
+                    return true;
+#endif
+                return false;
+            };
+
+            if(!isSupportedInputType(problem.a().dataType())
+               || !isSupportedInputType(problem.b().dataType())
+               || !isSupportedOutputType(problem.c().dataType())
+               || !isSupportedOutputType(problem.d().dataType()))
             {
                 std::string detail = "unsupported_type"
                     " A=" + TensileLite::ToString(problem.a().dataType())
@@ -998,6 +1026,29 @@ namespace TensileLite
                     + " C=" + TensileLite::ToString(problem.c().dataType())
                     + " D=" + TensileLite::ToString(problem.d().dataType());
                 return rejectFast(detail.c_str());
+            }
+
+            constexpr size_t FAST_BLOCK_K = 8;
+            size_t mxBlockA    = problem.mxBlockA();
+            size_t mxBlockB    = problem.mxBlockB();
+            size_t innerMXLoop = std::max(mxBlockA, mxBlockB);
+
+            if(innerMXLoop > 0)
+            {
+                if(innerMXLoop % FAST_BLOCK_K != 0)
+                    return rejectFast("mx_block_not_aligned_to_BLOCK_K");
+
+                size_t sizeK = problem.boundSize(0);
+                if(mxBlockA > 0 && sizeK % mxBlockA != 0)
+                    return rejectFast("K_not_multiple_of_mxBlockA");
+                if(mxBlockB > 0 && sizeK % mxBlockB != 0)
+                    return rejectFast("K_not_multiple_of_mxBlockB");
+            }
+
+            if(problem.boundIndices().size() >= 1)
+            {
+                if(problem.boundIndices()[0].aMirror || problem.boundIndices()[0].bMirror)
+                    return rejectFast("mirror_indices");
             }
 
             if(problem.batchIndices().empty())
@@ -1155,6 +1206,35 @@ namespace TensileLite
                 }
             }
 
+            // MX block-scaling metadata (FP4 with MX)
+            size_t         mxBlockA    = problem.mxBlockA();
+            size_t         mxBlockB    = problem.mxBlockB();
+            size_t         innerMXLoop = std::max(mxBlockA, mxBlockB);
+            const MXScale* mxsaPtr
+                = (mxBlockA > 0) ? static_cast<const MXScale*>(inputs.mxsa) : nullptr;
+            const MXScale* mxsbPtr
+                = (mxBlockB > 0) ? static_cast<const MXScale*>(inputs.mxsb) : nullptr;
+            size_t strideMxsaM = 0, strideMxsaBlk = 0;
+            size_t strideMxsbN = 0, strideMxsbBlk = 0;
+            size_t strideBatchMxsa = 0, strideBatchMxsb = 0;
+            if(innerMXLoop > 0)
+            {
+                if(mxBlockA > 0)
+                {
+                    strideMxsaM   = problem.mxsa().strides()[indexMA];
+                    strideMxsaBlk = problem.mxsa().strides()[indexKA];
+                    strideBatchMxsa
+                        = problem.mxsa().strides()[problem.batchIndices()[0].a];
+                }
+                if(mxBlockB > 0)
+                {
+                    strideMxsbN   = problem.mxsb().strides()[indexNB];
+                    strideMxsbBlk = problem.mxsb().strides()[indexKB];
+                    strideBatchMxsb
+                        = problem.mxsb().strides()[problem.batchIndices()[0].a];
+                }
+            }
+
             constexpr size_t BLOCK_M = 32;
             constexpr size_t BLOCK_N = 32;
             constexpr size_t BLOCK_K = 8;
@@ -1173,6 +1253,12 @@ namespace TensileLite
                 const float* curBatchB = shadowB.data() + (b * strideBatchB);
                 const float* curBatchC = shadowC.data() + (b * strideBatchC);
                 float*       curBatchD = ptrD + (b * strideBatchD);
+
+                const MXScale* mxsaBatch
+                    = mxsaPtr ? mxsaPtr + b * strideBatchMxsa : nullptr;
+                const MXScale* mxsbBatch
+                    = mxsbPtr ? mxsbPtr + b * strideBatchMxsb : nullptr;
+
                 for(size_t m = 0; m < mTiles; ++m)
                 {
                     auto m0 = m * BLOCK_M;
@@ -1183,11 +1269,8 @@ namespace TensileLite
                         std::array<float, BLOCK_M * BLOCK_K> aReg = {0};
                         std::array<float, BLOCK_K * BLOCK_N> bReg = {0};
                         std::array<float, BLOCK_M * BLOCK_N> cReg = {0};
-                        for(size_t k = 0; k < kTiles; ++k)
-                        {
-                            auto k0 = k * BLOCK_K;
 
-                            // Populate A 'registers':
+                        auto loadATile = [&](size_t k0) {
                             for(size_t km = 0; km < BLOCK_K; ++km)
                             {
                                 for(size_t mm = 0; mm < BLOCK_M; ++mm)
@@ -1196,7 +1279,8 @@ namespace TensileLite
                                     size_t global_m = m0 + mm;
                                     if(global_k < sizeK && global_m < sizeM)
                                     {
-                                        auto offset = global_m * strideMA + global_k * strideKA;
+                                        auto offset
+                                            = global_m * strideMA + global_k * strideKA;
                                         aReg[km * BLOCK_M + mm] = curBatchA[offset];
                                     }
                                     else
@@ -1205,8 +1289,9 @@ namespace TensileLite
                                     }
                                 }
                             }
+                        };
 
-                            // Populate B 'registers':
+                        auto loadBTile = [&](size_t k0) {
                             for(size_t kn = 0; kn < BLOCK_K; ++kn)
                             {
                                 for(size_t nn = 0; nn < BLOCK_N; ++nn)
@@ -1215,8 +1300,8 @@ namespace TensileLite
                                     size_t global_n = n0 + nn;
                                     if(global_k < sizeK && global_n < sizeN)
                                     {
-                                        bReg[kn * BLOCK_N + nn]
-                                            = curBatchB[global_n * strideNB + global_k * strideKB];
+                                        bReg[kn * BLOCK_N + nn] = curBatchB
+                                            [global_n * strideNB + global_k * strideKB];
                                     }
                                     else
                                     {
@@ -1224,29 +1309,94 @@ namespace TensileLite
                                     }
                                 }
                             }
+                        };
 
-                            // Perform matrix multiplication accumulation with k as inner-most (fastest)
-                            // dimension for both A and B. A, B, and C of sizes defined by BLOCK_M, BLOCK_N, BLOCK_K.
-                            // Store result in row-major order.
-                            auto innerReduction = [BLOCK_M, BLOCK_N, BLOCK_K](
-                                                      const float* A, const float* B, float* C) {
-                                for(size_t k_i = 0; k_i < BLOCK_K; ++k_i)
+                        auto innerReduction = [BLOCK_M, BLOCK_N, BLOCK_K](
+                                                  const float* A,
+                                                  const float* B,
+                                                  float*       C) {
+                            for(size_t k_i = 0; k_i < BLOCK_K; ++k_i)
+                            {
+                                for(size_t m_i = 0; m_i < BLOCK_M; ++m_i)
                                 {
-                                    for(size_t m_i = 0; m_i < BLOCK_M; ++m_i)
+                                    for(size_t n_i = 0; n_i < BLOCK_N; ++n_i)
                                     {
-                                        for(size_t n_i = 0; n_i < BLOCK_N; ++n_i)
-                                        {
-                                            auto  b_index = k_i * BLOCK_N + n_i;
-                                            auto  a_index = k_i * BLOCK_M + m_i;
-                                            auto  c_index = m_i * BLOCK_N + n_i;
-                                            float valB    = B[b_index];
-                                            float valA    = A[a_index];
-                                            C[c_index] += valA * valB;
-                                        }
+                                        auto  b_index = k_i * BLOCK_N + n_i;
+                                        auto  a_index = k_i * BLOCK_M + m_i;
+                                        auto  c_index = m_i * BLOCK_N + n_i;
+                                        float valB    = B[b_index];
+                                        float valA    = A[a_index];
+                                        C[c_index] += valA * valB;
                                     }
                                 }
-                            };
-                            innerReduction(aReg.data(), bReg.data(), cReg.data());
+                            }
+                        };
+
+                        if(innerMXLoop > 0)
+                        {
+                            size_t mxBlocks       = sizeK / innerMXLoop;
+                            size_t tilesPerMxBlock = innerMXLoop / BLOCK_K;
+
+                            for(size_t mxBlk = 0; mxBlk < mxBlocks; ++mxBlk)
+                            {
+                                std::array<float, BLOCK_M * BLOCK_N> tilePartial = {0};
+
+                                for(size_t kt = 0; kt < tilesPerMxBlock; ++kt)
+                                {
+                                    auto k0 = mxBlk * innerMXLoop + kt * BLOCK_K;
+                                    loadATile(k0);
+                                    loadBTile(k0);
+                                    innerReduction(
+                                        aReg.data(), bReg.data(), tilePartial.data());
+                                }
+
+                                size_t kOuter = mxBlk * innerMXLoop;
+                                size_t mxsaI
+                                    = (mxBlockA > 0) ? kOuter / mxBlockA : 0;
+                                size_t mxsbI
+                                    = (mxBlockB > 0) ? kOuter / mxBlockB : 0;
+
+                                for(size_t mm = 0; mm < BLOCK_M; ++mm)
+                                {
+                                    size_t global_m = m0 + mm;
+                                    if(global_m >= sizeM)
+                                        continue;
+
+                                    float sa = (mxBlockA > 0 && mxsaBatch)
+                                        ? static_cast<float>(mxsaBatch
+                                              [global_m * strideMxsaM
+                                               + mxsaI * strideMxsaBlk])
+                                        : 1.0f;
+
+                                    for(size_t nn = 0; nn < BLOCK_N; ++nn)
+                                    {
+                                        size_t global_n = n0 + nn;
+                                        if(global_n >= sizeN)
+                                            continue;
+
+                                        float sb = (mxBlockB > 0 && mxsbBatch)
+                                            ? static_cast<float>(mxsbBatch
+                                                  [global_n * strideMxsbN
+                                                   + mxsbI * strideMxsbBlk])
+                                            : 1.0f;
+
+                                        cReg[mm * BLOCK_N + nn]
+                                            += tilePartial[mm * BLOCK_N + nn]
+                                               * sa * sb;
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            for(size_t k = 0; k < kTiles; ++k)
+                            {
+                                auto k0 = k * BLOCK_K;
+                                loadATile(k0);
+                                loadBTile(k0);
+                                innerReduction(
+                                    aReg.data(), bReg.data(), cReg.data());
+                            }
                         }
 
                         // Copy from cReg back.
