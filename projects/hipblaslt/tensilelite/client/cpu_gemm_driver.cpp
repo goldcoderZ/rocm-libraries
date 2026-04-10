@@ -275,8 +275,6 @@ int runGemm(size_t         m,
             int                mxBlock = 0)
 {
     constexpr rocisa::DataType dtypeEnum = TypeTraits<InputT>::value;
-    static_assert(std::is_same<AccumulateT, float>::value,
-                  "Currently only float accumulation is supported");
 
 #ifndef _WIN32
     constexpr bool isFP4 = std::is_same_v<InputT, Float4x2>;
