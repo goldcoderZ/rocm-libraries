@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 find_package(GTest REQUIRED)
+include(GoogleTest)
 
 add_executable(tensilelite-tests)
 add_subdirectory(configs)
