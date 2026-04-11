@@ -45,7 +45,11 @@ target_link_libraries(tensilelite-tests
         ${CMAKE_DL_LIBS}
 )
 
-gtest_discover_tests(tensilelite-tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)
+gtest_discover_tests(tensilelite-tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    DISCOVERY_MODE PRE_TEST
+)
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
 
