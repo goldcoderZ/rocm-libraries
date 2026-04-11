@@ -77,14 +77,14 @@ std::size_t GetAvailableMemory()
 void* default_allocator(void*, size_t sz)
 {
     const auto available = GetAvailableMemory();
-    MIOPEN_LOG_I2("GetAvailableMemory " << available);
+    MIOPEN_LOG_NQE("GetAvailableMemory " << available);  // TRJS I2
     if(sz > available)
-        MIOPEN_LOG_I("GetAvailableMemory reports unsufficient memory to allocate " << sz);
+        MIOPEN_LOG_NQE("GetAvailableMemory reports unsufficient memory to allocate " << sz);  // TRJS I
     void* ptr;
     const auto status = hipMalloc(&ptr, sz);
     if(status == hipSuccess)
     {
-        MIOPEN_LOG_I2("hipMalloc " << sz << " at " << ptr << " Ok");
+        MIOPEN_LOG_NQE("hipMalloc " << sz << " at " << ptr << " Ok"); // TRJS I2
         return ptr;
     }
     MIOPEN_THROW_HIP_STATUS(status, "hipMalloc " + std::to_string(sz));
@@ -100,9 +100,9 @@ void* apu_allocator(void* ctx, size_t sz)
     // if(status != hipSuccess)
     //     MIOPEN_THROW_HIP_STATUS(status, "Failed getting GPU memory");
     const auto available = GetAvailableMemory();
-    MIOPEN_LOG_I2("GetAvailableMemory " << available);
+    MIOPEN_LOG_NQE("GetAvailableMemory " << available); // TRJS I2
     if(sz > available)
-        MIOPEN_LOG_I("GetAvailableMemory reports unsufficient memory to allocate " << sz);
+        MIOPEN_LOG_NQE("GetAvailableMemory reports unsufficient memory to allocate " << sz); // TRJS I
 
     void* host_ptr;
     auto status = hipHostMalloc(&host_ptr, sz, hipHostMallocMapped);
@@ -111,7 +111,7 @@ void* apu_allocator(void* ctx, size_t sz)
         MIOPEN_THROW_HIP_STATUS(status, "hipHostMalloc " + std::to_string(sz));
     }
 
-    MIOPEN_LOG_I2("hipHostMalloc " << sz << " at " << host_ptr << " Ok");
+    MIOPEN_LOG_NQE("hipHostMalloc " << sz << " at " << host_ptr << " Ok"); // TRJS I2
 
     void* dvc_ptr;
     status = hipHostGetDevicePointer(&dvc_ptr, host_ptr, 0);
@@ -122,7 +122,7 @@ void* apu_allocator(void* ctx, size_t sz)
         " bytes at " + std::to_string(reinterpret_cast<size_t>(host_ptr)));
     }
 
-    MIOPEN_LOG_I2("hipHostGetDevicePointer " << dvc_ptr << " for host pointer " << host_ptr << " Ok");
+    MIOPEN_LOG_I2("hipHostGetDevicePointer " << dvc_ptr << " for host pointer " << host_ptr << " Ok"); // TRJS I2
 
     device_to_host_ptrs[dvc_ptr] = host_ptr;
 
@@ -164,7 +164,7 @@ void apu_deallocator(void*, void* dvc_ptr)
                             );
     }
     else
-        MIOPEN_LOG_I2("hipHostFree " << size << " at " << host_ptr << " (host) -> " << dvc_ptr << " (dvc) Ok");
+        MIOPEN_LOG_I2("hipHostFree " << host_size << " at " << host_ptr << " (host) -> " << size " at " << dvc_ptr << " (dvc) Ok");
 }
 
 void default_deallocator(void*, void* mem)
@@ -281,7 +281,7 @@ struct HandleImpl
 
         if(!reported)
         {
-            MIOPEN_LOG_I2("integrated=" << props.integrated);
+            MIOPEN_LOG_NQE("integrated=" << props.integrated);  // TRJS
             reported = true;
         }
 
