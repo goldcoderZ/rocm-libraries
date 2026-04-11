@@ -64,17 +64,54 @@ if(TENSILELITE_ENABLE_HOST)
     endif()
 endif()
 
-# Stage Python sources for TheRock CI pytest execution via artifact system.
+# Stage sources for TheRock CI pytest execution via artifact system.
+# Layout:
+#   shared/origami/                      <- origami (for ../../shared/origami)
+#   share/hipblaslt-test-src/            <- hipblaslt cmake root (HIPBLASLT_SOURCE_DIR)
+#     CMakeLists.txt, CMakePresets.json, LICENSE.md, cmake/
+#     tensilelite/                       <- TENSILELITE_DIR for uv/pytest
+#       pyproject.toml, uv.lock, pytest.ini, Tensile/, rocisa/, scripts/
 if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
     set(_tl_src "${CMAKE_CURRENT_SOURCE_DIR}")
-    set(_tl_dest "${CMAKE_INSTALL_DATADIR}/tensilelite-tests")
+    set(_hipblaslt_src "${_tl_src}/../..")
+    set(_tl_hipblaslt_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt-test-src")
+    set(_tl_dest "${_tl_hipblaslt_dest}/tensilelite")
 
+    # hipblaslt top-level files needed by cmake --preset rocisa
     install(FILES
-        "${_tl_src}/pyproject.toml"
-        "${_tl_src}/uv.lock"
-        "${_tl_src}/pytest.ini"
-        DESTINATION "${_tl_dest}"
+        "${_hipblaslt_src}/CMakeLists.txt"
+        "${_hipblaslt_src}/CMakePresets.json"
+        "${_hipblaslt_src}/LICENSE.md"
+        DESTINATION "${_tl_hipblaslt_dest}"
     )
+    # hipblaslt cmake modules needed by the rocisa preset
+    install(FILES
+        "${_hipblaslt_src}/cmake/fetch_rocm_cmake.cmake"
+        "${_hipblaslt_src}/cmake/hipblaslt_shim.cmake"
+        "${_hipblaslt_src}/cmake/hipblaslt_python.cmake"
+        "${_hipblaslt_src}/cmake/hipblaslt_target_configure_sanitizers.cmake"
+        "${_hipblaslt_src}/cmake/tensilelite_supported_architectures.cmake"
+        DESTINATION "${_tl_hipblaslt_dest}/cmake"
+    )
+
+    # origami at correct relative offset (../../shared/origami from hipblaslt root)
+    install(DIRECTORY "${_hipblaslt_src}/../../shared/origami/"
+        DESTINATION "shared/origami"
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+        PATTERN "build" EXCLUDE
+        PATTERN ".git*" EXCLUDE
+        PATTERN "python" EXCLUDE
+        PATTERN "tests" EXCLUDE
+    )
+
+    # TensileLite Python sources
+    set(_tl_files "${_tl_src}/pyproject.toml" "${_tl_src}/pytest.ini")
+    if(EXISTS "${_tl_src}/uv.lock")
+        list(APPEND _tl_files "${_tl_src}/uv.lock")
+    endif()
+    install(FILES ${_tl_files} DESTINATION "${_tl_dest}")
+
     install(DIRECTORY "${_tl_src}/Tensile/"
         DESTINATION "${_tl_dest}/Tensile"
         PATTERN "__pycache__" EXCLUDE

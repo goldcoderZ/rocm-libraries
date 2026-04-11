@@ -14,7 +14,10 @@ class CMakeBuild(build_ext):
         try:
             os.makedirs(self.build_temp, exist_ok=True)
             os.makedirs(self.build_lib, exist_ok=True)
-            source_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', '..')
+            source_dir = os.environ.get(
+                'HIPBLASLT_SOURCE_DIR',
+                os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', '..'),
+            )
             rocm_path = os.environ.get('ROCM_PATH', '/opt/rocm')
             compilerpath = os.path.join(rocm_path, 'bin/amdclang++')
             cmakeargs = [
