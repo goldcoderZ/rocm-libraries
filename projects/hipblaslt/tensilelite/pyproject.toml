@@ -55,6 +55,9 @@ testpaths = ["Tensile/Tests", "rocisa/test"]
 
 [tool.uv]
 no-build-isolation-package = ["rocisa"]
+# rocisa's build-system.requires are ignored due to no-build-isolation above.
+# Declare them here so uv pre-installs them before building rocisa.
+extra-build-dependencies = { rocisa = ["setuptools", "nanobind", "cmake"] }
 
 [tool.uv.sources]
 rocisa = { workspace = true }

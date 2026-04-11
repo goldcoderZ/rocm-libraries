@@ -73,7 +73,8 @@ endif()
 #       pyproject.toml, uv.lock, pytest.ini, Tensile/, rocisa/, scripts/
 if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
     set(_tl_src "${CMAKE_CURRENT_SOURCE_DIR}")
-    set(_hipblaslt_src "${_tl_src}/../..")
+    cmake_path(SET _hipblaslt_src NORMALIZE "${_tl_src}/..")
+    cmake_path(SET _origami_src NORMALIZE "${_hipblaslt_src}/../../shared/origami")
     set(_tl_hipblaslt_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt-test-src")
     set(_tl_dest "${_tl_hipblaslt_dest}/tensilelite")
 
@@ -95,7 +96,7 @@ if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
     )
 
     # origami at correct relative offset (../../shared/origami from hipblaslt root)
-    install(DIRECTORY "${_hipblaslt_src}/../../shared/origami/"
+    install(DIRECTORY "${_origami_src}/"
         DESTINATION "shared/origami"
         PATTERN "__pycache__" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
