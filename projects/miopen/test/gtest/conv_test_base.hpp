@@ -146,7 +146,7 @@ struct GroupConvTestConfig<2u> : GroupConvTestConfigBase
                 // clang-format off
             // g   n    C    K    img         filter    pad     stride  dilation
 //  build up memory usage
-//  winapuchk4a
+//  winapuchk4b
             /*13*/  {4,  4,  224,  224,  {469, 724}, {3, 3}, {1, 1}, {2, 2}, {1, 1}},
             /*13*/  {4,  4,  224,  224,  {469, 724}, {3, 3}, {1, 1}, {2, 2}, {1, 1}},
             /*13*/  {4,  4,  224,  224,  {469, 724}, {3, 3}, {1, 1}, {2, 2}, {1, 1}},
