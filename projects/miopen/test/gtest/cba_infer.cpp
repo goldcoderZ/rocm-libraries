@@ -168,6 +168,7 @@ inline auto gcbaInferParamGenApu(Configs configs, TensorTypes tensorTypes)
                               testing::Values(0.5f));
 }
 
+
 template <typename Configs, typename TensorTypes>
 inline auto gcbaInferParamGenFull(Configs configs, TensorTypes tensorTypes)
 {
