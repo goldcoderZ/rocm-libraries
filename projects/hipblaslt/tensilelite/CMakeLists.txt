@@ -55,11 +55,11 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(src)
     add_subdirectory(include)
 
-    if(TENSILELITE_ENABLE_CLIENT)
+    if(TENSILELITE_ENABLE_CLIENT AND NOT WIN32)
         add_subdirectory(client)
     endif()
 
-    if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+    if((TENSILELITE_BUILD_TESTING OR BUILD_TESTING) AND NOT WIN32)
         add_subdirectory(tests)
     endif()
 endif()
@@ -71,7 +71,7 @@ endif()
 #     CMakeLists.txt, CMakePresets.json, LICENSE.md, cmake/
 #     tensilelite/                       <- TENSILELITE_DIR for uv/pytest
 #       pyproject.toml, uv.lock, pytest.ini, Tensile/, rocisa/, scripts/
-if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+if((TENSILELITE_BUILD_TESTING OR BUILD_TESTING) AND NOT WIN32)
     set(_tl_src "${CMAKE_CURRENT_SOURCE_DIR}")
     cmake_path(SET _hipblaslt_src NORMALIZE "${_tl_src}/..")
     cmake_path(SET _origami_src NORMALIZE "${_hipblaslt_src}/../../shared/origami")
