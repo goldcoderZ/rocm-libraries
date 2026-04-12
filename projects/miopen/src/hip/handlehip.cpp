@@ -205,6 +205,7 @@ MIOPEN_INTERNALS_EXPORT void set_device(int id)
         MIOPEN_THROW_HIP_STATUS(status, "Error setting device " + std::to_string(id));
 }
 
+
 #if MIOPEN_BUILD_DEV
 int set_default_device()
 {
