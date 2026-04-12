@@ -164,7 +164,7 @@ void apu_deallocator(void*, void* dvc_ptr)
                             );
     }
     else
-        MIOPEN_LOG_I2("hipHostFree " << host_size << " at " << host_ptr << " (host) -> " << size " at " << dvc_ptr << " (dvc) Ok");
+        MIOPEN_LOG_I2("hipHostFree " << host_size << " at " << host_ptr << " (host) -> " << size << " at " << dvc_ptr << " (dvc) Ok");
 }
 
 void default_deallocator(void*, void* mem)
