@@ -3,9 +3,21 @@
 
 from invoke.tasks import task
 import os
+import subprocess
+
+
+def cpu_supports(feature):
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("flags"):
+                    return feature in line.split()
+    except Exception:
+        pass
+    return False
+
 
 def detect_gpu_arch():
-    import subprocess
     import sys
     try:
         result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
@@ -65,8 +77,10 @@ def build_client(c, clean=False, configure=True, build=True, build_dir="build_tm
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DGPU_TARGETS={gpu_targets}",
             f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={enable_rocprof}",
-            "-DCMAKE_CXX_FLAGS=-march=native",
         ]
+
+        if cpu_supports("f16c"):
+            cmake_cmd.append("-DCMAKE_CXX_FLAGS=-mf16c")
 
         c.run(shlex.join(cmake_cmd))
 
