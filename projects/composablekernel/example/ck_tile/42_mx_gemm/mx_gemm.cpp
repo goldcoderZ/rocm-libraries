@@ -94,8 +94,9 @@ float invoke_mx_gemm(ck_tile::DeviceMem& a_dev_buf,
 
     std::cout << "Run " << ck_tile::gemm_prec_str<ADataType, BDataType>() << " MX GEMM kernel " //
               << " M = " << M << " N = " << N << " K = " << K << " StrideA = " << stride_A
-              << " StrideB = " << stride_B << " StrideC = " << stride_C << " : " << ave_time
-              << " ms, " << tflops << " TFlops, " << gb_per_sec << " GB/s, " << std::endl;
+              << " StrideB = " << stride_B << " StrideC = " << stride_C
+              << " Preshuffle = " << GemmConfig::Preshuffle << " : " << ave_time << " ms, "
+              << tflops << " TFlops, " << gb_per_sec << " GB/s, " << std::endl;
 
     return ave_time;
 }
