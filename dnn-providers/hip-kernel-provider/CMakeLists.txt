@@ -12,6 +12,15 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(HIP_KERNEL_PLUGIN_VERSION "0.0.1")
 project(hip-kernel-provider VERSION ${HIP_KERNEL_PLUGIN_VERSION} LANGUAGES CXX)
 
+# Get ROCM_PATH from configuration options as it is required to set include paths for hiprtc
+set(ROCM_PATH "" CACHE PATH "Path to ROCm installation")
+if(NOT ROCM_PATH)
+    message(FATAL_ERROR "ROCM_PATH must be set. Please provide -DROCM_PATH=/path/to/rocm")
+endif()
+file(TO_CMAKE_PATH "${ROCM_PATH}" ROCM_PATH)
+message(STATUS "Using ROCM_PATH: ${ROCM_PATH}")
+add_compile_definitions(ROCM_PATH="${ROCM_PATH}")
+
 if(NOT WIN32)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
