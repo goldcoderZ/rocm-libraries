@@ -88,6 +88,29 @@ if(BUILD_DISPATCHER_BINDINGS)
     add_subdirectory(bindings/ctypes)
 endif()
 
+# Optional: Kpack runtime kernel loading backend
+option(DISPATCHER_ENABLE_KPACK "Enable kpack runtime kernel loading backend" OFF)
+if(DISPATCHER_ENABLE_KPACK)
+    # rocm_ck headers (spec types, args, projection)
+    set(ROCM_CK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../experimental/rocm_ck/include"
+        CACHE PATH "Path to rocm_ck include directory")
+    get_filename_component(ROCM_CK_INCLUDE_DIR "${ROCM_CK_INCLUDE_DIR}" ABSOLUTE)
+
+    target_include_directories(ck_tile_dispatcher PUBLIC
+        $<BUILD_INTERFACE:${ROCM_CK_INCLUDE_DIR}>)
+
+    # rocm_kpack runtime library
+    if(NOT TARGET rocm_kpack)
+        set(ROCM_KPACK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../experimental/rocm_ck/rocm_kpack"
+            CACHE PATH "Path to rocm_kpack source directory")
+        get_filename_component(ROCM_KPACK_DIR "${ROCM_KPACK_DIR}" ABSOLUTE)
+        add_subdirectory(${ROCM_KPACK_DIR} rocm_kpack_build)
+    endif()
+    target_link_libraries(ck_tile_dispatcher PRIVATE rocm_kpack)
+
+    target_compile_definitions(ck_tile_dispatcher PUBLIC CK_TILE_DISPATCHER_HAS_KPACK=1)
+endif()
+
 # If codegen is enabled, add generated include directory
 if(DISPATCHER_AUTO_GENERATE_WRAPPERS AND DISPATCHER_GENERATED_INCLUDE_DIR)
     target_include_directories(ck_tile_dispatcher

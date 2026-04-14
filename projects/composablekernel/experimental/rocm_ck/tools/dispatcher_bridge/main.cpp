@@ -4,7 +4,7 @@
 // Dispatcher Bridge PoC — load a kpack archive, register its kernels with
 // the CK dispatcher, run a GEMM through the dispatcher API, and verify.
 
-#include "register_kpack.hpp"
+#include <ck_tile/dispatcher/backends/kpack_backend.hpp>
 
 #include <rocm_ck/hip_check.hpp>
 #include <rocm_ck/kpack_spec_reader.hpp>
@@ -61,7 +61,7 @@ int main(int argc, char** argv)
 
     // --- Register kpack kernels with the dispatcher registry ---
     ck_tile::dispatcher::Registry registry;
-    int n_registered = rocm_ck::registerKpackKernels(argv[1], registry);
+    int n_registered = ck_tile::dispatcher::backends::registerKpackKernels(argv[1], registry);
     std::printf("\nRegistered %d kernels from kpack\n\n", n_registered);
 
     if(n_registered == 0)
