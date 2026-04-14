@@ -309,13 +309,25 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
     if(problem.IsTensorsCasted())
         return false;
-    if(!problem.IsFp16())
-        return false;
     if(problem.HasNonPackedTensors())
         return false;
 
+    WinoShaderArgs args;
+    if(!args.SetConvParams(problem))
+        return false;
+
     const auto devName = ctx.GetStream().GetDeviceName();
-    if(!(StartsWith(devName, "gfx94") || StartsWith(devName, "gfx12")))
+    if(StartsWith(devName, "gfx94"))
+    {
+        if(!(problem.IsFp16() || problem.IsFp32() || problem.IsBfp16()))
+            return false;
+    }
+    else if(StartsWith(devName, "gfx12"))
+    {
+        if(!(problem.IsFp16()))
+            return false;
+    }
+    else
     {
         return false;
     }
@@ -327,10 +339,6 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
     if(!(problem.GetKernelStrideH() == 1 && problem.GetKernelStrideW() == 1))
         return false;
     if(!(problem.GetDilationH() == 1 && problem.GetDilationW() == 1))
-        return false;
-
-    WinoShaderArgs args;
-    if(!args.SetConvParams(problem))
         return false;
 
     args.n_groups     = getMaxNGroups(ctx);
@@ -395,15 +403,13 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
         devName, args, ctx.GetStream().GetMaxHardwareComputeUnits(), problem, kernelVersion);
     auto perfmodel_result = shader_model->ComputeWti(problem.IsFp32());
     auto nGroups          = perfmodel_result.n_groups;
+
     args.SetShaderParams(nGroups, flags, 0, 0);
 
     // Kernel name and file
-    const auto versionStr = [](ShaderModelFactory::KernelVersion kv,
-                               const std::string& dn) -> std::string {
-        if(StartsWith(dn, "gfx12"))
-            return (kv == ShaderModelFactory::KernelVersion::V4_6) ? "_v4_6_1" : "_v4_9_1";
-        return (kv == ShaderModelFactory::KernelVersion::V4_6) ? "_v4_6_0" : "_v4_7_0";
-    }(kernelVersion, devName);
+    const auto versionStr = [](ShaderModelFactory::KernelVersion kv) -> std::string {
+        return (kv == ShaderModelFactory::KernelVersion::V4_6) ? "_v4_6_1" : "_v4_9_1";
+    }(kernelVersion);
 
     const auto archStr = [](const std::string& dn) -> std::string {
         if(StartsWith(dn, "gfx94"))
@@ -413,7 +419,16 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
         MIOPEN_THROW(miopenStatusInternalError);
     }(devName);
 
-    const std::string dTypeStr  = "_fp16_fp32acc";
+    const auto dTypeStr = [](const ProblemDescription& p) -> std::string {
+        if(p.IsFp16())
+            return "_fp16_fp32acc";
+        if(p.IsFp32())
+            return "_fp32_fp32acc";
+        if(p.IsBfp16())
+            return "_bf16_fp32acc";
+        MIOPEN_THROW(miopenStatusInternalError);
+    }(problem);
+
     const std::string strideStr = "_stride1";
     const auto winoVariantStr   = []() -> std::string {
         if constexpr(Winodata == 2 && Winofilter == 3)

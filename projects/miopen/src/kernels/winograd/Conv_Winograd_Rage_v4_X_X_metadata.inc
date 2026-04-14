@@ -24,6 +24,7 @@ amdhsa.kernels:
     .kernarg_segment_align: 8
     .reqd_workgroup_size: [ \wg_x, 1, 1 ]
     .max_flat_workgroup_size: \wg_x
+    .uniform_work_group_size: 1
     .wavefront_size: 64
     .workgroup_processor_mode: 0
     .args:
