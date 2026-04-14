@@ -33,6 +33,8 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_sort_comparator.hpp"
 
+#include "test_utils_controller.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -1262,6 +1264,10 @@ void sort_pairs_double_buffer()
 
 inline void sort_keys_over_4g()
 {
+	std::string suite_name = ::testing::UnitTest::GetInstance()->current_test_info()->test_suite_name();
+    std::string test_name = ::testing::UnitTest::GetInstance()->current_test_info()->name();
+	std::cout << "Name: " << suite_name << "." << test_name << std::endl;
+	
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));

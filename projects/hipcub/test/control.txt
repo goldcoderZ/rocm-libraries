@@ -1,0 +1,20 @@
+# This file lists tests that are disabled.
+# The format is:
+# /<test name regex>/ : /<gfx id regex>/ | <keyword>
+#
+# Where:
+# - <test name regex> : a regular expression to match against the fully qualified name of the currently running test (TestSuiteName.TestName).
+# - <gfx id regex>    : a regular expression to match against the gfxId of the current device (eg. gfx942).
+# - <keyword>         : one of the following predefined keywords that refers to a set of architectures:
+#                       - all  : all devices
+#                       - apus : gfx1103, gfx1150, gfx1151, gfx1152
+#                       - navi2x-family : gfx1030, gfx1031, gfx1032
+#                       - navi3x-family : gfx1100, gfx1101, gfx1102
+#                       - navi4x-family : gfx1200, gfx1201
+#                       - mi100-family  : gfx908
+#                       - mi200-family  : gfx90a
+#                       - mi300-family  : gfx942, gfx950
+#
+# Multiple keywords may be combined using "|" (eg. navi2x-family | navi3x-family)
+
+/HipcubDeviceRadixSort\.SortKeysOver4G/ = apus
