@@ -1112,13 +1112,12 @@ def get_bwd_blobs(
                 cond &= deterministic == "f"
                 if not cond:
                     continue
-            # test.sh: batch+group deterministic minimal set
+            # test.sh: batch+group, det+non-det minimal set
             elif receipt == 5:
                 cond = dtype in ["fp16"]
                 cond &= bias in ["no"]
                 cond &= dropout in ["no"]
                 cond &= dpad == dvpad
-                cond &= deterministic == "t"
                 cond &= mode in ["group", "batch"]
                 if not cond:
                     continue
