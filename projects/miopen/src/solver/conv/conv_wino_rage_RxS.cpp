@@ -233,7 +233,7 @@ public:
                                          KernelVersion kernel_version,
                                          const ProblemDescription& problem)
     {
-        if(StartsWith(dev_name, "gfx94"))
+        if(StartsWith(dev_name, "gfx94") || StartsWith(dev_name, "gfx95"))
         {
             return (kernel_version == KernelVersion::V4_6) ? PerfParams::GFX942_V4_6
                    : (problem.IsFp16())                    ? PerfParams::GFX942_V4_9_fp16
@@ -317,7 +317,7 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
 
     const auto devName = ctx.GetStream().GetDeviceName();
-    if(StartsWith(devName, "gfx94"))
+    if(StartsWith(devName, "gfx94") || StartsWith(devName, "gfx95"))
     {
         if(!(problem.IsFp16() || problem.IsFp32() || problem.IsBfp16()))
             return false;
@@ -413,9 +413,11 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
 
     const auto archStr = [](const std::string& dn) -> std::string {
         if(StartsWith(dn, "gfx94"))
-            return "_gfx9";
+            return "_gfx94";
+        if(StartsWith(dn, "gfx95"))
+            return "_gfx95";
         if(StartsWith(dn, "gfx12"))
-            return "_gfx12";
+            return "_gfx120";
         MIOPEN_THROW(miopenStatusInternalError);
     }(devName);
 
@@ -437,7 +439,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
             static_assert(Winodata == 2 && Winofilter == 3);
     }();
 
-    // e.g. miopenSp3AsmConvRage_v4_6_1_gfx12_fp16_fp32acc_f2x3_stride1
+    // e.g. miopenSp3AsmConvRage_v4_6_1_gfx120_fp16_fp32acc_f2x3_stride1
     std::string kernelName =
         "miopenSp3AsmConvRage" + versionStr + archStr + dTypeStr + winoVariantStr + strideStr;
     // e.g. Conv_Winograd_Rage_v4_6_1_fp16_fp32acc_f2x3_stride1.s
@@ -457,7 +459,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     kernelInfo.comp_options = options.GenerateFor(kbp::GcnAsm{});
     kernelInfo.comp_options += std::string(" -mcumode");
 
-    uint64_t wgSize = 768U; // value for gfx942
+    uint64_t wgSize = 768U; // value for gfx942 and gfx950
     if(StartsWith(devName, "gfx12"))
     {
         wgSize = 384U;
