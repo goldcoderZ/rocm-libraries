@@ -157,6 +157,16 @@ class KpackGemmKernelInstance : public KernelInstance
             grid_y = grid_n;
         }
 
+        // Early detection: reject kernels whose static LDS exceeds the device
+        // limit. Would fail at launch anyway, but this gives a clear message.
+        int max_lds = 0;
+        HIP_CHECK_THROW(
+            hipDeviceGetAttribute(&max_lds, hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
+        if(shared_mem_bytes_ > static_cast<unsigned int>(max_lds))
+            throw std::runtime_error("KpackGemmKernelInstance: kernel '" + name_ + "' needs " +
+                                     std::to_string(shared_mem_bytes_) +
+                                     " bytes LDS but device max is " + std::to_string(max_lds));
+
         // HIP event timing
         hipEvent_t start, stop;
         HIP_CHECK_THROW(hipEventCreate(&start));
@@ -171,6 +181,9 @@ class KpackGemmKernelInstance : public KernelInstance
                                  &args_size,
                                  HIP_LAUNCH_PARAM_END};
 
+        // sharedMemBytes=0: CK kernels use static __shared__ (embedded in the
+        // binary's group_segment_fixed_size), not extern __shared__. Passing
+        // the static size here would double the LDS allocation and fault.
         HIP_CHECK_THROW(hipModuleLaunchKernel(kernel_->function(),
                                               grid_x,
                                               grid_y,
@@ -178,7 +191,7 @@ class KpackGemmKernelInstance : public KernelInstance
                                               spec_.workgroup_size,
                                               1,
                                               1,
-                                              shared_mem_bytes_,
+                                              0,
                                               hip_stream,
                                               nullptr,
                                               launch_config));
@@ -211,7 +224,7 @@ class KpackGemmKernelInstance : public KernelInstance
         auto downloadAsFloat = [](const void* dev_ptr, rocm_ck::DataType dtype, int count) {
             int elem_bytes = rocm_ck::dataTypeBits(dtype) / 8;
             std::vector<char> raw(static_cast<size_t>(count) * elem_bytes);
-            HIP_CHECK(hipMemcpy(raw.data(), dev_ptr, raw.size(), hipMemcpyDeviceToHost));
+            HIP_CHECK_THROW(hipMemcpy(raw.data(), dev_ptr, raw.size(), hipMemcpyDeviceToHost));
             std::vector<float> out(count);
             for(int i = 0; i < count; ++i)
                 out[i] = rocm_ck::typedToFloat(dtype, raw.data() + i * elem_bytes);

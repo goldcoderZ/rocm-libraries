@@ -75,12 +75,7 @@ class KpackKernelInstance : public ck_tile::dispatcher::KernelInstance
               const ck_tile::dispatcher::Problem& problem,
               void* stream) const override
     {
-        // Thread-safe lazy kernel loading
-        std::call_once(load_flag_, [this]() {
-            kernel_.emplace();
-            if(!kernel_->load(*archive_, name_.c_str()))
-                throw std::runtime_error("Failed to load kernel '" + name_ + "' from kpack");
-        });
+        ensureLoaded();
 
         hipStream_t hip_stream = reinterpret_cast<hipStream_t>(stream);
 
@@ -134,6 +129,15 @@ class KpackKernelInstance : public ck_tile::dispatcher::KernelInstance
             grid_y = grid_n;
         }
 
+        // Early detection: reject kernels whose static LDS exceeds the device
+        // limit. Would fail at launch anyway, but this gives a clear message.
+        int max_lds = 0;
+        HIP_CHECK(hipDeviceGetAttribute(&max_lds, hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
+        if(shared_mem_bytes_ > static_cast<unsigned int>(max_lds))
+            throw std::runtime_error("KpackKernelInstance: kernel '" + name_ + "' needs " +
+                                     std::to_string(shared_mem_bytes_) +
+                                     " bytes LDS but device max is " + std::to_string(max_lds));
+
         // HIP event timing
         hipEvent_t start, stop;
         HIP_CHECK(hipEventCreate(&start));
@@ -149,6 +153,9 @@ class KpackKernelInstance : public ck_tile::dispatcher::KernelInstance
                                  &args_size,
                                  HIP_LAUNCH_PARAM_END};
 
+        // sharedMemBytes=0: CK kernels use static __shared__ (embedded in the
+        // binary's group_segment_fixed_size), not extern __shared__. Passing
+        // the static size here would double the LDS allocation and fault.
         HIP_CHECK(hipModuleLaunchKernel(kernel_->function(),
                                         grid_x,
                                         grid_y,
@@ -252,12 +259,30 @@ class KpackKernelInstance : public ck_tile::dispatcher::KernelInstance
     }
 
     private:
+    void ensureLoaded() const
+    {
+        std::call_once(load_flag_, [this]() {
+            kernel_.emplace();
+            if(!kernel_->load(*archive_, name_.c_str()))
+            {
+                kernel_.reset();
+                throw std::runtime_error("Failed to load kernel '" + name_ + "' from kpack");
+            }
+
+            int smem = 0;
+            HIP_CHECK(hipFuncGetAttribute(
+                &smem, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel_->function()));
+            shared_mem_bytes_ = static_cast<unsigned int>(smem);
+        });
+    }
+
     ck_tile::dispatcher::KernelKey key_;
     std::string name_;
     GemmSpec spec_;
     std::shared_ptr<KpackArchive> archive_;
     mutable std::once_flag load_flag_;
     mutable std::optional<KpackKernel> kernel_;
+    mutable unsigned int shared_mem_bytes_ = 0;
 };
 
 } // namespace rocm_ck
