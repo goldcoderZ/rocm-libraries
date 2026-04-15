@@ -35,7 +35,22 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
+
+// Throwing variant of HIP_CHECK for use in run() — allows callers to catch
+// and continue rather than terminating the process on GPU errors.
+#define HIP_CHECK_THROW(call)                                                                  \
+    do                                                                                         \
+    {                                                                                          \
+        hipError_t err = (call);                                                               \
+        if(err != hipSuccess)                                                                  \
+        {                                                                                      \
+            throw std::runtime_error(                                                          \
+                std::string("HIP error ") + std::to_string(static_cast<int>(err)) + " (" +     \
+                hipGetErrorString(err) + ") at " + __FILE__ + ":" + std::to_string(__LINE__)); \
+        }                                                                                      \
+    } while(0)
 
 namespace ck_tile {
 namespace dispatcher {
@@ -144,9 +159,9 @@ class KpackGemmKernelInstance : public KernelInstance
 
         // HIP event timing
         hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-        HIP_CHECK(hipEventRecord(start, hip_stream));
+        HIP_CHECK_THROW(hipEventCreate(&start));
+        HIP_CHECK_THROW(hipEventCreate(&stop));
+        HIP_CHECK_THROW(hipEventRecord(start, hip_stream));
 
         void* args_ptr        = &kernel_args;
         size_t args_size      = sizeof(kernel_args);
@@ -156,26 +171,26 @@ class KpackGemmKernelInstance : public KernelInstance
                                  &args_size,
                                  HIP_LAUNCH_PARAM_END};
 
-        HIP_CHECK(hipModuleLaunchKernel(kernel_->function(),
-                                        grid_x,
-                                        grid_y,
-                                        grid_z,
-                                        spec_.workgroup_size,
-                                        1,
-                                        1,
-                                        shared_mem_bytes_,
-                                        hip_stream,
-                                        nullptr,
-                                        launch_config));
+        HIP_CHECK_THROW(hipModuleLaunchKernel(kernel_->function(),
+                                              grid_x,
+                                              grid_y,
+                                              grid_z,
+                                              spec_.workgroup_size,
+                                              1,
+                                              1,
+                                              shared_mem_bytes_,
+                                              hip_stream,
+                                              nullptr,
+                                              launch_config));
 
-        HIP_CHECK(hipEventRecord(stop, hip_stream));
-        HIP_CHECK(hipEventSynchronize(stop));
+        HIP_CHECK_THROW(hipEventRecord(stop, hip_stream));
+        HIP_CHECK_THROW(hipEventSynchronize(stop));
 
         float elapsed_ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_ms, start, stop));
+        HIP_CHECK_THROW(hipEventElapsedTime(&elapsed_ms, start, stop));
 
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
+        HIP_CHECK_THROW(hipEventDestroy(start));
+        HIP_CHECK_THROW(hipEventDestroy(stop));
 
         return elapsed_ms;
     }
@@ -247,7 +262,7 @@ class KpackGemmKernelInstance : public KernelInstance
             }
 
             int smem = 0;
-            HIP_CHECK(hipFuncGetAttribute(
+            HIP_CHECK_THROW(hipFuncGetAttribute(
                 &smem, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel_->function()));
             shared_mem_bytes_ = static_cast<unsigned int>(smem);
         });

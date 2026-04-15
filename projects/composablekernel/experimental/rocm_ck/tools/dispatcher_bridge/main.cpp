@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Dispatcher Bridge PoC — load a kpack archive, register its kernels with
-// the CK dispatcher, run a GEMM through the dispatcher API, and verify.
+// Dispatcher Bridge — load a kpack archive, register its kernels with
+// the CK dispatcher, run each GEMM through the dispatcher API, and verify.
 
 #include <ck_tile/dispatcher/backends/kpack_backend.hpp>
 
@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <unordered_map>
 #include <vector>
 
 // ============================================================================
@@ -73,157 +74,177 @@ int main(int argc, char** argv)
     // --- List registered kernels ---
     auto all_kernels = registry.get_all();
     std::printf("Registered kernels:\n");
-    for(const auto& k : all_kernels)
-    {
-        std::printf(
-            "  %-30s  %s\n", k->get_name().c_str(), k->get_key().encode_identifier().c_str());
-    }
+    for(size_t i = 0; i < all_kernels.size(); ++i)
+        std::printf("  [%zu] %s\n", i + 1, all_kernels[i]->get_name().c_str());
     std::printf("\n");
 
-    // --- Find a basic FP16 kernel to test ---
-    // registry.lookup() matches by encode_identifier(), not name.
-    // Search by name instead.
-    ck_tile::dispatcher::KernelInstancePtr kernel;
-    for(const auto& k : all_kernels)
-        if(k->get_name() == "gemm_fp16")
-        {
-            kernel = k;
-            break;
-        }
-    if(!kernel)
-    {
-        kernel = all_kernels[0];
-        std::printf("gemm_fp16 not found, using: %s\n", kernel->get_name().c_str());
-    }
+    // --- Read variant specs for dtype/layout info ---
+    auto variants = rocm_ck::readVariantSpecs(argv[1]);
 
-    // --- Setup test problem (same as example 04) ---
+    std::unordered_map<std::string, rocm_ck::GemmSpec> spec_map;
+    for(const auto& vi : variants)
+        spec_map[vi.name] = vi.gemm_spec;
+
+    // --- Setup test problem ---
     constexpr int M = 512;
     constexpr int N = 512;
     constexpr int K = 256;
 
     ck_tile::dispatcher::Problem problem(M, N, K);
 
-    if(!kernel->supports(problem))
+    // --- Run and verify each kernel ---
+    int total   = 0;
+    int pass    = 0;
+    int fail    = 0;
+    int skipped = 0;
+
+    for(size_t ki = 0; ki < all_kernels.size(); ++ki)
     {
-        std::fprintf(
-            stderr, "%s does not support M=%d N=%d K=%d\n", kernel->get_name().c_str(), M, N, K);
-        return 1;
-    }
+        const auto& kernel = all_kernels[ki];
+        int num            = static_cast<int>(ki + 1);
 
-    // --- Generate input data (values 0-7 for exact fp16 accumulation) ---
-    std::vector<float> h_a(M * K);
-    std::vector<float> h_b(K * N);
-    for(int i = 0; i < M * K; ++i)
-        h_a[i] = static_cast<float>(i % 8);
-    for(int i = 0; i < K * N; ++i)
-        h_b[i] = static_cast<float>(i % 8);
-
-    // --- Read the selected kernel's spec from kpack ---
-    // We need the GemmSpec for layout info and dtype — read from the archive TOC.
-    auto variants = rocm_ck::readVariantSpecs(argv[1]);
-    rocm_ck::GemmSpec spec{};
-    for(const auto& vi : variants)
-        if(vi.name == kernel->get_name())
+        auto it = spec_map.find(kernel->get_name());
+        if(it == spec_map.end())
         {
-            spec = vi.gemm_spec;
-            break;
+            std::printf("[%d] %s\n    skip: no spec in TOC\n", num, kernel->get_name().c_str());
+            ++skipped;
+            continue;
+        }
+        const auto& spec = it->second;
+
+        if(!kernel->supports(problem))
+        {
+            std::printf("[%d] %s\n    skip: does not support M=%d N=%d K=%d\n",
+                        num,
+                        kernel->get_name().c_str(),
+                        M,
+                        N,
+                        K);
+            ++skipped;
+            continue;
         }
 
-    // --- CPU reference (layout-aware) ---
-    auto [a_sm, a_sk] = rocm_ck::layoutStrides(spec.lhs().layout, M, K);
-    auto [b_sk, b_sn] = rocm_ck::layoutStrides(spec.rhs().layout, K, N);
-    auto [c_sm, c_sn] = rocm_ck::layoutStrides(spec.output().layout, M, N);
+        std::printf("[%d] %s\n", num, kernel->get_name().c_str());
+        std::fflush(stdout);
 
-    std::vector<float> ref_c(M * N, 0.0f);
-    cpuGemm(h_a.data(), h_b.data(), ref_c.data(), M, N, K, a_sm, a_sk, b_sk, b_sn, c_sm, c_sn);
-
-    // --- Allocate and upload GPU buffers ---
-    rocm_ck::TypedBuffer buf_a(spec.lhs().dtype, M * K);
-    rocm_ck::TypedBuffer buf_b(spec.rhs().dtype, K * N);
-    rocm_ck::TypedBuffer buf_c(spec.output().dtype, M * N);
-
-    buf_a.upload(h_a.data());
-    buf_b.upload(h_b.data());
-    buf_c.zero();
-
-    // --- Run through the dispatcher KernelInstance interface ---
-    std::printf("Running %s: M=%d, N=%d, K=%d, block=%d\n",
-                kernel->get_name().c_str(),
-                M,
-                N,
-                K,
-                kernel->get_key().algorithm.block_size);
-
-    float time_ms = kernel->run(buf_a.ptr(), buf_b.ptr(), buf_c.ptr(), nullptr, problem, nullptr);
-
-    // --- Verify ---
-    std::vector<float> result(M * N);
-    buf_c.download(result.data());
-
-    // Tolerance depends on output dtype — fp16/bf16 have ~0.1% relative error
-    // from accumulation over K elements, fp32/fp64 are near-exact.
-    float tolerance = 1e-5f;
-    if(spec.output().dtype == rocm_ck::DataType::FP16 ||
-       spec.output().dtype == rocm_ck::DataType::BF16)
-        tolerance = 1e-2f;
-    else if(spec.output().dtype == rocm_ck::DataType::FP8_FNUZ ||
-            spec.output().dtype == rocm_ck::DataType::FP8_OCP ||
-            spec.output().dtype == rocm_ck::DataType::BF8_FNUZ ||
-            spec.output().dtype == rocm_ck::DataType::BF8_OCP)
-        tolerance = 5e-2f;
-
-    int errors        = 0;
-    float max_rel_err = 0.0f;
-    for(int i = 0; i < M * N; ++i)
-    {
-        float expected = ref_c[i];
-        float actual   = result[i];
-        float rel_err =
-            (expected != 0.0f) ? std::fabs((actual - expected) / expected) : std::fabs(actual);
-        max_rel_err = std::fmax(max_rel_err, rel_err);
-        if(rel_err > tolerance)
-            ++errors;
-    }
-
-    bool passed = (errors == 0);
-    std::printf("%s: %s  (%.3f ms, max_rel_err=%.2e, errors=%d/%d)\n",
-                kernel->get_name().c_str(),
-                passed ? "PASSED" : "FAILED",
-                time_ms,
-                max_rel_err,
-                errors,
-                M * N);
-
-    if(!passed)
-    {
-        // Print first few errors
-        int shown = 0;
-        for(int i = 0; i < M * N && shown < 5; ++i)
+        try
         {
-            float expected = ref_c[i];
-            float actual   = result[i];
-            float rel_err =
-                (expected != 0.0f) ? std::fabs((actual - expected) / expected) : std::fabs(actual);
-            if(rel_err > tolerance)
+            // Generate input data (values 0-7 for exact fp16 accumulation)
+            std::vector<float> h_a(M * K);
+            std::vector<float> h_b(K * N);
+            for(int i = 0; i < M * K; ++i)
+                h_a[i] = static_cast<float>(i % 8);
+            for(int i = 0; i < K * N; ++i)
+                h_b[i] = static_cast<float>(i % 8);
+
+            // CPU reference (layout-aware)
+            auto [a_sm, a_sk] = rocm_ck::layoutStrides(spec.lhs().layout, M, K);
+            auto [b_sk, b_sn] = rocm_ck::layoutStrides(spec.rhs().layout, K, N);
+            auto [c_sm, c_sn] = rocm_ck::layoutStrides(spec.output().layout, M, N);
+
+            std::vector<float> ref_c(M * N, 0.0f);
+            cpuGemm(
+                h_a.data(), h_b.data(), ref_c.data(), M, N, K, a_sm, a_sk, b_sk, b_sn, c_sm, c_sn);
+
+            // Allocate and upload GPU buffers
+            rocm_ck::TypedBuffer buf_a(spec.lhs().dtype, M * K);
+            rocm_ck::TypedBuffer buf_b(spec.rhs().dtype, K * N);
+            rocm_ck::TypedBuffer buf_c(spec.output().dtype, M * N);
+
+            buf_a.upload(h_a.data());
+            buf_b.upload(h_b.data());
+            buf_c.zero();
+
+            // Run
+            float time_ms =
+                kernel->run(buf_a.ptr(), buf_b.ptr(), buf_c.ptr(), nullptr, problem, nullptr);
+
+            // Verify
+            std::vector<float> result(M * N);
+            buf_c.download(result.data());
+
+            float tolerance = 1e-5f;
+            if(spec.output().dtype == rocm_ck::DataType::FP16 ||
+               spec.output().dtype == rocm_ck::DataType::BF16)
+                tolerance = 1e-2f;
+            else if(spec.output().dtype == rocm_ck::DataType::FP8_FNUZ ||
+                    spec.output().dtype == rocm_ck::DataType::FP8_OCP ||
+                    spec.output().dtype == rocm_ck::DataType::BF8_FNUZ ||
+                    spec.output().dtype == rocm_ck::DataType::BF8_OCP)
+                tolerance = 5e-2f;
+
+            int errors        = 0;
+            float max_rel_err = 0.0f;
+            for(int i = 0; i < M * N; ++i)
             {
-                std::printf("  [%d] expected=%.4f actual=%.4f rel_err=%.2e\n",
-                            i,
-                            expected,
-                            actual,
-                            rel_err);
-                ++shown;
+                float expected = ref_c[i];
+                float actual   = result[i];
+                float rel_err  = (expected != 0.0f) ? std::fabs((actual - expected) / expected)
+                                                    : std::fabs(actual);
+                max_rel_err    = std::fmax(max_rel_err, rel_err);
+                if(rel_err > tolerance)
+                    ++errors;
+            }
+
+            bool kernel_passed = (errors == 0);
+            double tflops      = (2.0 * M * N * K) / (time_ms * 1e9);
+
+            std::printf("    %s  (%.3f ms, %.2f TFLOPS, max_rel_err=%.2e, errors=%d/%d)\n",
+                        kernel_passed ? "PASSED" : "FAILED",
+                        time_ms,
+                        tflops,
+                        max_rel_err,
+                        errors,
+                        M * N);
+
+            if(!kernel_passed)
+            {
+                int shown = 0;
+                for(int i = 0; i < M * N && shown < 5; ++i)
+                {
+                    float expected = ref_c[i];
+                    float actual   = result[i];
+                    float rel_err  = (expected != 0.0f) ? std::fabs((actual - expected) / expected)
+                                                        : std::fabs(actual);
+                    if(rel_err > tolerance)
+                    {
+                        std::printf("      [%d] expected=%.4f actual=%.4f rel_err=%.2e\n",
+                                    i,
+                                    expected,
+                                    actual,
+                                    rel_err);
+                        ++shown;
+                    }
+                }
+                ++fail;
+            }
+            else
+            {
+                ++pass;
             }
         }
+        catch(const std::exception& e)
+        {
+            std::fflush(stderr);
+            std::printf("\nERROR RUNNING KERNEL [%d]\n%s\n", num, e.what());
+            ++fail;
+
+            // GPU context is unrecoverable after a device fault on ROCm.
+            // Report results so far and exit.
+            ++total;
+            std::printf("GPU fault — remaining kernels skipped.\n");
+            break;
+        }
+        ++total;
     }
 
-    // --- Validate through KernelInstance::validate() ---
-    bool validated =
-        kernel->validate(buf_a.ptr(), buf_b.ptr(), buf_c.ptr(), nullptr, problem, tolerance);
-    std::printf("validate(): %s\n", validated ? "PASSED" : "FAILED");
+    // --- Summary ---
+    std::printf("\n%d/%d passed", pass, total);
+    if(skipped > 0)
+        std::printf(", %d skipped", skipped);
+    if(fail > 0)
+        std::printf(", %d FAILED", fail);
+    std::printf("\n");
 
-    // --- Performance ---
-    double tflops = (2.0 * M * N * K) / (time_ms * 1e9);
-    std::printf("Performance: %.2f TFLOPS\n", tflops);
-
-    return (passed && validated) ? 0 : 1;
+    return (fail == 0) ? 0 : 1;
 }
