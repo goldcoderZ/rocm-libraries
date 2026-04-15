@@ -64,7 +64,6 @@ class CMakeBuild(build_ext):
 setup(
     name='rocisa',
     version="0.1.0",
-    packages=["rocisa"],
     ext_modules=[Extension("rocisa", sources=[])],
     install_requires=["nanobind"],
     cmdclass={"build_ext": CMakeBuild},
