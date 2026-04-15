@@ -638,8 +638,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 64u, 4u, 4u, CtrlFlags, CompilerTarge
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for int8_t, int8_t, int32_t MMA operation on GFX9
- * architecture.
+ * @brief Specialization of amdgcn_mma for int8_t, int8_t, int32_t MMA operation on GFX908 and
+ * GFX90a architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
  */
@@ -666,8 +666,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 32u, 32u, 8u, CtrlFlags, CompilerTarg
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for int8_t, int8_t, int32_t MMA operation on GFX9
- * architecture.
+ * @brief Specialization of amdgcn_mma for int8_t, int8_t, int32_t MMA operation on GFX908 and
+ * GFX90a architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
  */
@@ -694,7 +694,7 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 16u, CtrlFlags, CompilerTar
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX9
+ * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX908 and GFX90a
  * architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
@@ -722,7 +722,7 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 32u, 64u, 2u, CtrlFlags, CompilerTarge
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX9
+ * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX908 and GFX90a
  * architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
@@ -750,7 +750,7 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 64u, 32u, 2u, CtrlFlags, CompilerTarge
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX9
+ * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX908 and GFX90a
  * architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
@@ -778,7 +778,7 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 64u, 2u, CtrlFlags, CompilerTarge
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX9
+ * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX908 and GFX90a
  * architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
@@ -806,7 +806,7 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 64u, 16u, 2u, CtrlFlags, CompilerTarge
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX9
+ * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX908 and GFX90a
  * architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
@@ -834,7 +834,7 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 4u, 64u, 2u, CtrlFlags, CompilerTarget
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX9
+ * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX908 and GFX90a
  * architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
@@ -862,7 +862,7 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 64u, 4u, 2u, CtrlFlags, CompilerTarget
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX9
+ * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX908 and GFX90a
  * architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
@@ -890,7 +890,7 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 32u, 32u, 4u, CtrlFlags, CompilerTarge
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX9
+ * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX908 and GFX90a
  * architecture.
  * @tparam CtrlFlags Control flags for the MFMA operation
  * @tparam CompilerTarget Current compiler target
