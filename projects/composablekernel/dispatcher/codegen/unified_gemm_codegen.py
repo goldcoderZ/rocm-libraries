@@ -1353,6 +1353,11 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
 class UnifiedGemmCodegen:
     """Unified GEMM code generator - single entry point"""
 
+    # File extensions written by codegen, used for cleaning stale artifacts.
+    # Note: .spec.json files match via ".json" since Path.suffix returns the
+    # last extension only. All .json files in the kernel dir are codegen output.
+    _CODEGEN_EXTENSIONS = {".hip", ".json", ".hsaco", ".kpack", ".hpp", ".cpp"}
+
     def __init__(
         self,
         output_dir: Path,
@@ -1368,6 +1373,7 @@ class UnifiedGemmCodegen:
         kpack_arches: Optional[List[str]] = None,
         rocm_path: str = "/opt/rocm",
         kpack_zstd: bool = False,
+        clean: bool = True,
     ):
         self.output_dir = Path(output_dir)
         self.datatype = datatype
@@ -1397,6 +1403,10 @@ class UnifiedGemmCodegen:
             self.wrapper_dir = self.kernel_dir / "dispatcher_wrappers"
             self.wrapper_dir.mkdir(parents=True, exist_ok=True)
 
+        # Clean stale codegen artifacts from previous runs
+        if clean:
+            self._clean_codegen_artifacts()
+
         # Load configuration
         self.config = self._load_config(config_file)
 
@@ -1412,6 +1422,28 @@ class UnifiedGemmCodegen:
         # Initialize generators (use self.layout which is the 3-char A,B,C layout)
         self.ck_gen = CKTileKernelGenerator(datatype, self.layout)
         self.disp_gen = DispatcherWrapperGenerator(datatype, self.layout)
+
+    def _clean_codegen_artifacts(self) -> None:
+        """Remove stale codegen artifacts from the output directory.
+
+        Without this, running codegen twice to the same dir mixes old and new
+        files — pack.py globs *.spec.json and *.hsaco, so stale files silently
+        enter the kpack archive.
+        """
+        removed = 0
+        for path in self.kernel_dir.iterdir():
+            if path.is_file() and path.suffix in self._CODEGEN_EXTENSIONS:
+                path.unlink()
+                removed += 1
+        # Also clean dispatcher_wrappers/ if it exists
+        wrapper_dir = self.kernel_dir / "dispatcher_wrappers"
+        if wrapper_dir.is_dir():
+            for path in wrapper_dir.iterdir():
+                if path.is_file() and path.suffix in self._CODEGEN_EXTENSIONS:
+                    path.unlink()
+                    removed += 1
+        if removed:
+            log.info(f"Cleaned {removed} stale artifact(s) from {self.kernel_dir}")
 
     def _load_config(self, config_file: Optional[Path]) -> Dict:
         """Load or create default configuration"""
@@ -2026,6 +2058,11 @@ def main():
         "--no-parallel", action="store_true", help="Disable parallel generation"
     )
     parser.add_argument(
+        "--no-clean",
+        action="store_true",
+        help="Skip cleaning stale artifacts from output dir before generation",
+    )
+    parser.add_argument(
         "--register", action="store_true", help="Generate dispatcher registration code"
     )
     parser.add_argument(
@@ -2160,6 +2197,7 @@ def main():
         kpack_arches=args.kpack_arches,
         rocm_path=args.rocm_path,
         kpack_zstd=args.zstd,
+        clean=not args.no_clean,
     )
 
     results = codegen.generate_all(parallel=not args.no_parallel)
