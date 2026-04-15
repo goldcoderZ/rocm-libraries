@@ -124,6 +124,17 @@ int main(int argc, char** argv)
             continue;
         }
 
+        // Skip multi-D kernels — D tensor fusion not wired yet
+        if(spec.numDTensors() > 0)
+        {
+            std::printf("[%d] %s\n    skip: needs %d D tensor(s) (fusion not supported)\n",
+                        num,
+                        kernel->get_name().c_str(),
+                        spec.numDTensors());
+            ++skipped;
+            continue;
+        }
+
         std::printf("[%d] %s\n", num, kernel->get_name().c_str());
         std::fflush(stdout);
 
@@ -229,11 +240,18 @@ int main(int argc, char** argv)
             std::printf("\nERROR RUNNING KERNEL [%d]\n%s\n", num, e.what());
             ++fail;
 
-            // GPU context is unrecoverable after a device fault on ROCm.
-            // Report results so far and exit.
-            ++total;
-            std::printf("GPU fault — remaining kernels skipped.\n");
-            break;
+            // Check if the GPU is still usable. hipGetLastError returns the
+            // sticky error state — if it's non-zero, the device context is
+            // unrecoverable on ROCm and we must stop.
+            hipError_t gpu_err = hipGetLastError();
+            if(gpu_err != hipSuccess)
+            {
+                ++total;
+                std::printf("GPU fault (%s) — remaining kernels skipped.\n",
+                            hipGetErrorString(gpu_err));
+                break;
+            }
+            // Host-side error (validation, load failure) — safe to continue
         }
         ++total;
     }

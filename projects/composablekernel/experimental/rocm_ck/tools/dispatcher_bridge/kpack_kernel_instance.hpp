@@ -74,11 +74,12 @@ class KpackKernelInstance : public ck_tile::dispatcher::KernelInstance
               const ck_tile::dispatcher::Problem& problem,
               void* stream) const override
     {
-        // D tensor pointers not wired through Args yet. Reject if the caller
-        // passes non-null d_ptrs for a kernel that expects D tensors — running
-        // would read uninitialized Args slots and produce wrong results.
-        if(d_ptrs != nullptr && spec_.numDTensors() > 0)
-            throw std::runtime_error("KpackKernelInstance: D tensor fusion not implemented yet");
+        // D tensor fusion not wired through Args yet — reject any kernel that
+        // expects D tensors, regardless of whether the caller provided pointers.
+        if(spec_.numDTensors() > 0)
+            throw std::runtime_error("KpackKernelInstance: kernel '" + name_ + "' expects " +
+                                     std::to_string(spec_.numDTensors()) +
+                                     " D tensor(s) — D tensor fusion not implemented yet");
         (void)d_ptrs;
 
         // Thread-safe lazy kernel loading
