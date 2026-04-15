@@ -480,246 +480,26 @@ class KpackGenerator:
 
     Each .hip file uses rocm-ck's makeSpec() + run<kSpec>() pattern:
     the spec is a constexpr value, and gemm_dev.hpp wires it to CK Tile templates.
+
+    Translation and serialization are in rocm_ck_model.py. This class
+    provides the codegen entry points and build orchestration (compilation,
+    packing).
     """
-
-    # Dispatcher codegen pipeline names → rocm-ck Pipeline enum values
-    PIPELINE_MAP = {
-        "compv1": "V1",
-        "compv3": "V3",
-        "compv4": "V4",
-        "mem": "Memory",
-        "preshufflev2": "Preshuffle",
-    }
-
-    # Dispatcher codegen epilogue names → rocm-ck StoreStrategy enum values
-    STORE_STRATEGY_MAP = {
-        "cshuffle": "CShuffle",
-        "default": "Direct2D",
-    }
-
-    # Dispatcher codegen scheduler names → rocm-ck PipelineScheduler enum values
-    SCHEDULER_MAP = {
-        "intrawave": "Intrawave",
-        "interwave": "Interwave",
-    }
-
-    # Dispatcher codegen dtype names → rocm-ck DataType enum values
-    DTYPE_MAP = {
-        "fp16": "FP16",
-        "bf16": "BF16",
-        "fp32": "FP32",
-        "fp64": "FP64",
-        "fp8": "FP8_FNUZ",
-        "bf8": "BF8_FNUZ",
-        "int8": "I8",
-        "int4": "I4",
-    }
-
-    # Layout character → rocm-ck Layout enum value
-    LAYOUT_MAP = {"r": "Row", "c": "Col"}
-
-    # Dispatcher codegen dtype names → rocm-ck accumulator DataType enum values
-    ACC_DTYPE_MAP = {
-        "fp16": "FP32",
-        "bf16": "FP32",
-        "fp32": "FP32",
-        "fp64": "FP64",
-        "fp8": "FP32",
-        "bf8": "FP32",
-        "int8": "I32",
-        "int4": "I32",
-    }
-
-    # Dispatcher codegen dtype names → rocm-ck output DataType enum values
-    # When output dtype differs from input dtype (e.g., INT8→I32, FP8→FP16)
-    OUTPUT_DTYPE_MAP = {
-        "fp16": "FP16",
-        "bf16": "BF16",
-        "fp32": "FP32",
-        "fp64": "FP64",
-        "fp8": "FP16",
-        "bf8": "FP16",
-        "int8": "I32",
-        "int4": "I32",
-    }
-
-    # Dispatcher codegen dtype names → rocm-ck TargetSet constructor expression
-    TARGET_SET_MAP = {
-        "fp16": "cdna()",
-        "bf16": "cdna()",
-        "fp32": "cdna()",
-        "fp64": "cdna()",
-        "fp8": "family_gfx94()",
-        "bf8": "family_gfx94()",
-        "int8": "family_gfx94()",
-        "int4": "family_gfx94()",
-    }
-
-    # Dispatcher elementwise_op values that are unary activations (applied after D tensor adds)
-    _UNARY_ACTIVATION_OPS = {
-        "Relu": "ReluOp",
-        "Gelu": "GeluOp",
-        "FastGelu": "FastGeluOp",
-        "Silu": "SiluOp",
-        "Sigmoid": "SigmoidOp",
-    }
-
-    # Dispatcher elementwise_op values that are binary D-tensor ops
-    _BINARY_D_OPS = {
-        "MultiDAdd": "AddOp",
-        "MultiDMultiply": "MulOp",
-    }
-
-    @classmethod
-    def _build_ops_chain(cls, config: "KernelConfig", datatype: str) -> str:
-        """Build rocm_ck Signature.ops chain from dispatcher config.
-
-        Maps elementwise_op + num_d_tensors to the rocm_ck op graph:
-        - GEMM op is always first (A × B → intermediate)
-        - Binary D-tensor ops (Add/Mul) fold D0, D1, ... into the chain
-        - Unary activations (Relu, Gelu, etc.) apply after any D-tensor ops
-        - Tensor names advance through the alphabet: C → D → E → F → ...
-
-        Returns the formatted ops array content for the Signature literal.
-        """
-        acc_dtype = cls.ACC_DTYPE_MAP[datatype]
-
-        # GemmOp — always first
-        if acc_dtype != "FP32":
-            gemm_op = f'rocm_ck::GemmOp{{.lhs = "A", .rhs = "B", .out = "C", .acc_dtype = rocm_ck::DataType::{acc_dtype}}}'
-        else:
-            gemm_op = 'rocm_ck::GemmOp{.lhs = "A", .rhs = "B", .out = "C"}'
-
-        ops = [gemm_op]
-        # Current output tensor name — advances through the chain
-        cur = "C"
-
-        ew_op = config.elementwise_op
-        num_d = config.num_d_tensors
-
-        # Binary D-tensor ops (MultiDAdd, MultiDMultiply)
-        if ew_op in cls._BINARY_D_OPS:
-            op_type = cls._BINARY_D_OPS[ew_op]
-            for i in range(num_d):
-                nxt = chr(ord(cur) + 1)
-                ops.append(
-                    f'rocm_ck::{op_type}{{.lhs = "{cur}", .rhs = "D{i}", .out = "{nxt}"}}'
-                )
-                cur = nxt
-        elif ew_op in cls._UNARY_ACTIVATION_OPS:
-            # Unary activations with D tensors: add D tensors first, then activate
-            for i in range(num_d):
-                nxt = chr(ord(cur) + 1)
-                ops.append(
-                    f'rocm_ck::AddOp{{.lhs = "{cur}", .rhs = "D{i}", .out = "{nxt}"}}'
-                )
-                cur = nxt
-            # Apply activation
-            nxt = chr(ord(cur) + 1)
-            activation = cls._UNARY_ACTIVATION_OPS[ew_op]
-            ops.append(f'rocm_ck::{activation}{{.in = "{cur}", .out = "{nxt}"}}')
-            cur = nxt
-
-        # Format: each op on its own line, aligned with first op
-        indent = "                                 "
-        return (",\n" + indent).join(ops)
 
     @classmethod
     def generate_hip(
         cls, config: "KernelConfig", kernel_name: str, datatype: str, layout: str
     ) -> str:
         """Generate .hip file content for a kernel config."""
-        dtype_cpp = cls.DTYPE_MAP[datatype]
-        pipeline = cls.PIPELINE_MAP[config.trait.pipeline]
-        scheduler = cls.SCHEDULER_MAP.get(config.trait.scheduler, "Intrawave")
-        store_strategy = cls.STORE_STRATEGY_MAP[config.trait.epilogue]
-        t = config.tile
+        from rocm_ck_model import (
+            DISPATCHER_TARGET_SET,
+            to_hip_source,
+            translate_kernel_config,
+        )
 
-        # Build GemmAlgorithm fields — only emit non-defaults
-        algo_fields = [
-            f".block_tile  = {{{t.tile_m}, {t.tile_n}, {t.tile_k}}}",
-            f".block_waves = {{{t.warp_m}, {t.warp_n}, {t.warp_k}}}",
-            f".wave_tile   = {{{t.warp_tile_m}, {t.warp_tile_n}, {t.warp_tile_k}}}",
-        ]
-        if pipeline != "V1":
-            algo_fields.append(f".pipeline    = rocm_ck::Pipeline::{pipeline}")
-        if scheduler != "Intrawave":
-            algo_fields.append(
-                f".pipeline_scheduler = rocm_ck::PipelineScheduler::{scheduler}"
-            )
-        if store_strategy != "CShuffle":
-            algo_fields.append(
-                f".store_strategy = rocm_ck::StoreStrategy::{store_strategy}"
-            )
-        if config.trait.pad_m:
-            algo_fields.append(".pad_m = true")
-        if config.trait.pad_n:
-            algo_fields.append(".pad_n = true")
-
-        algo_block = ",\n                           ".join(algo_fields)
-
-        ops_chain = cls._build_ops_chain(config, datatype)
-        target_set = cls.TARGET_SET_MAP.get(datatype, "cdna()")
-
-        # Build Signature fields — emit .tensors when output dtype differs from input
-        output_dtype_cpp = cls.OUTPUT_DTYPE_MAP.get(datatype, dtype_cpp)
-        if output_dtype_cpp != dtype_cpp:
-            sig_block = (
-                f".dtype   = rocm_ck::DataType::{dtype_cpp},\n"
-                f'                       .tensors = {{rocm_ck::Tensor{{.name = "C", .dtype = rocm_ck::DataType::{output_dtype_cpp}}}}},\n'
-                f"                       .ops     = {{{ops_chain}}}"
-            )
-        else:
-            sig_block = (
-                f".dtype = rocm_ck::DataType::{dtype_cpp},\n"
-                f"                       .ops   = {{{ops_chain}}}"
-            )
-
-        return f"""\
-// Auto-generated by unified_gemm_codegen.py --output-format kpack
-// SPDX-License-Identifier: MIT
-
-#pragma once
-
-#include <rocm_ck/gemm_spec.hpp>
-
-static constexpr const char* kName = "{kernel_name}";
-
-static constexpr auto kTargets = rocm_ck::TargetSet::{target_set};
-
-static constexpr auto kSpec = rocm_ck::makeSpec(
-    rocm_ck::Signature{{{sig_block}}},
-    rocm_ck::GemmAlgorithm{{{algo_block}}},
-    kTargets);
-
-#ifdef __HIP_DEVICE_COMPILE__
-#include <rocm_ck/gemm_dev.hpp>
-
-extern "C" __global__ void {kernel_name}(rocm_ck::Args args)
-{{
-    rocm_ck::run<kSpec>(args);
-}}
-#endif
-"""
-
-    @classmethod
-    def _build_epilogue_ops(cls, config: "KernelConfig") -> list:
-        """Build epilogue_ops list for spec JSON from dispatcher config."""
-        ops = []
-        ew_op = config.elementwise_op
-        num_d = config.num_d_tensors
-
-        if ew_op in cls._BINARY_D_OPS:
-            op_name = "Add" if ew_op == "MultiDAdd" else "Mul"
-            for _ in range(num_d):
-                ops.append(op_name)
-        elif ew_op in cls._UNARY_ACTIVATION_OPS:
-            # D tensor adds come first
-            for _ in range(num_d):
-                ops.append("Add")
-            ops.append(ew_op)
-
-        return ops
+        sig, algo, spec = translate_kernel_config(config, datatype, layout, [])
+        target_set = DISPATCHER_TARGET_SET.get(datatype, "cdna()")
+        return to_hip_source(kernel_name, sig, algo, target_set)
 
     @classmethod
     def generate_spec_json(
@@ -731,68 +511,10 @@ extern "C" __global__ void {kernel_name}(rocm_ck::Args args)
         targets: List[str],
     ) -> dict:
         """Generate spec JSON matching the format pack.py expects."""
-        dtype_str = cls.DTYPE_MAP[datatype]
-        output_dtype_str = cls.OUTPUT_DTYPE_MAP.get(datatype, dtype_str)
-        t = config.tile
+        from rocm_ck_model import translate_kernel_config
 
-        # Physical tensor table from layout
-        # A and B use input dtype; C uses output dtype (may differ, e.g. INT8→I32)
-        tensor_dtypes = [dtype_str, dtype_str, output_dtype_str]
-        physical_tensors = [
-            {
-                "name": name,
-                "dtype": td,
-                "layout": cls.LAYOUT_MAP[lc],
-                "args_slot": i,
-            }
-            for i, (name, lc, td) in enumerate(
-                zip(["A", "B", "C"], layout[:3], tensor_dtypes)
-            )
-        ]
-
-        # D tensors for multi-D variants
-        for i in range(config.num_d_tensors):
-            physical_tensors.append(
-                {
-                    "name": f"D{i}",
-                    "dtype": output_dtype_str,
-                    "layout": cls.LAYOUT_MAP[config.d_layout],
-                    "args_slot": 3 + i,
-                }
-            )
-
-        # Workgroup size = product(block_waves) * wavefront_size
-        wavefront_size = 64  # CDNA
-        workgroup_size = t.warp_m * t.warp_n * t.warp_k * wavefront_size
-
-        return {
-            "name": kernel_name,
-            "spec_type": "GemmSpec",
-            "targets": targets,
-            "spec": {
-                "physical_tensors": physical_tensors,
-                "acc_dtype": cls.ACC_DTYPE_MAP.get(datatype, "FP32"),
-                "block_tile": {"m": t.tile_m, "n": t.tile_n, "k": t.tile_k},
-                "block_waves": {"m": t.warp_m, "n": t.warp_n, "k": t.warp_k},
-                "wave_tile": {
-                    "m": t.warp_tile_m,
-                    "n": t.warp_tile_n,
-                    "k": t.warp_tile_k,
-                },
-                "workgroup_size": workgroup_size,
-                "k_batch": 1,
-                "pipeline": cls.PIPELINE_MAP[config.trait.pipeline],
-                "pipeline_scheduler": cls.SCHEDULER_MAP.get(
-                    config.trait.scheduler, "Intrawave"
-                ),
-                "tile_partitioner": "Linear",
-                "epilogue_ops": cls._build_epilogue_ops(config),
-                "store_strategy": cls.STORE_STRATEGY_MAP[config.trait.epilogue],
-                "pad_m": config.trait.pad_m,
-                "pad_n": config.trait.pad_n,
-                "group_size": 0,
-            },
-        }
+        sig, algo, spec = translate_kernel_config(config, datatype, layout, targets)
+        return spec.to_spec_json(kernel_name, targets)
 
     @staticmethod
     def compile_hsaco(
