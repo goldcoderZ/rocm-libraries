@@ -481,7 +481,7 @@ class KpackGenerator:
     Each .hip file uses rocm-ck's makeSpec() + run<kSpec>() pattern:
     the spec is a constexpr value, and gemm_dev.hpp wires it to CK Tile templates.
 
-    Translation and serialization are in rocm_ck_model.py. This class
+    Translation and serialization are in rocm_ck_bridge.py. This class
     provides the codegen entry points and build orchestration (compilation,
     packing).
     """
@@ -491,7 +491,7 @@ class KpackGenerator:
         cls, config: "KernelConfig", kernel_name: str, datatype: str, layout: str
     ) -> str:
         """Generate .hip file content for a kernel config."""
-        from rocm_ck_model import (
+        from rocm_ck_bridge import (
             DISPATCHER_TARGET_SET,
             to_hip_source,
             translate_kernel_config,
@@ -511,7 +511,7 @@ class KpackGenerator:
         targets: List[str],
     ) -> dict:
         """Generate spec JSON matching the format pack.py expects."""
-        from rocm_ck_model import translate_kernel_config
+        from rocm_ck_bridge import translate_kernel_config
 
         sig, algo, spec = translate_kernel_config(config, datatype, layout, targets)
         return spec.to_spec_json(kernel_name, targets)

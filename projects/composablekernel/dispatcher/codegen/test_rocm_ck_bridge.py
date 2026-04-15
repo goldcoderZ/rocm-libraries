@@ -1,12 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tests for rocm_ck_model — mapping tables, translation, and serialization.
+"""Tests for rocm_ck_bridge — mapping tables, translation, and serialization.
 
-Run: pytest test_rocm_ck_model.py -v
+Run: pytest test_rocm_ck_bridge.py -v
 """
 
-from rocm_ck_model import (
+from rocm_ck_bridge import (
     DISPATCHER_ACC_DTYPE,
     DISPATCHER_DTYPE,
     DISPATCHER_LAYOUT,
