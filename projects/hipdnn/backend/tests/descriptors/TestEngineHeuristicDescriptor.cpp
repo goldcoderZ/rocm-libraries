@@ -9,13 +9,17 @@
 #include "descriptors/EngineHeuristicDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
+#include "heuristics/SelectionHeuristic.hpp"
 #include "hipdnn_backend.h"
 #include "mocks/MockDescriptor.hpp"
 #include "mocks/MockEnginePluginResourceManager.hpp"
 #include "mocks/MockHandle.hpp"
+#include "mocks/MockHeuristicPluginResourceManager.hpp"
+#include "mocks/MockHeuristicPlugin.hpp"
 
 #include <gtest/gtest.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 #include <memory>
 #include <vector>
@@ -58,6 +62,12 @@ public:
         EXPECT_CALL(*getMockGraph(), getHandle()).WillRepeatedly(Return(_mockHandle.get()));
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillRepeatedly(Return(_mockEnginePluginResourceManager));
+        EXPECT_CALL(*_mockHandle, getHeuristicPluginResourceManager())
+            .WillRepeatedly(Return(_mockHeuristicPluginResourceManager));
+
+        // Set up mock heuristic plugin automatically when graph is set
+        setupMockHeuristicPlugin();
+
         ASSERT_NO_THROW(
             getEngineHeuristicDescriptor()->setAttribute(HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -74,11 +84,68 @@ public:
 
     void makeEngineHeuristicFinalized() const
     {
-        setGraph();
+        setGraph(); // This now automatically sets up the heuristic mock
         setHeuristicMode();
         EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
             .WillRepeatedly(Return(std::vector<int64_t>{0, 1, 2}));
         ASSERT_NO_THROW(getEngineHeuristicDescriptor()->finalize());
+    }
+
+    void setupMockHeuristicPlugin() const
+    {
+        // Mock policy IDs for both well-known policies
+        const int64_t configPolicyId =
+            hipdnn_data_sdk::utilities::engineNameToId("SelectionHeuristic::Config");
+        const int64_t staticOrderingPolicyId =
+            hipdnn_data_sdk::utilities::engineNameToId("SelectionHeuristic::StaticOrdering");
+
+        // Mock handles and descriptors
+        auto mockHandle = reinterpret_cast<hipdnnHeuristicHandle_t>(0x1234);
+        auto mockDescriptor = reinterpret_cast<hipdnnHeuristicPolicyDescriptor_t>(0x5678);
+
+        // Set up expectations for resource manager - Config policy returns nullptr (skips)
+        EXPECT_CALL(*_mockHeuristicPluginResourceManager,
+                    getPluginForPolicyId(configPolicyId))
+            .WillRepeatedly(Return(nullptr));
+        EXPECT_CALL(*_mockHeuristicPluginResourceManager,
+                    getHeuristicHandleForPolicyId(configPolicyId))
+            .WillRepeatedly(Return(nullptr));
+
+        // StaticOrdering policy succeeds
+        EXPECT_CALL(*_mockHeuristicPluginResourceManager,
+                    getPluginForPolicyId(staticOrderingPolicyId))
+            .WillRepeatedly(Return(_mockHeuristicPlugin.get()));
+        EXPECT_CALL(*_mockHeuristicPluginResourceManager,
+                    getHeuristicHandleForPolicyId(staticOrderingPolicyId))
+            .WillRepeatedly(Return(mockHandle));
+        EXPECT_CALL(*_mockHeuristicPluginResourceManager,
+                    setDevicePropertiesOnAllHandles(_))
+            .WillRepeatedly(Return());
+
+        // Set up expectations for the mock plugin
+        EXPECT_CALL(*_mockHeuristicPlugin, setDeviceProperties(mockHandle, _))
+            .WillRepeatedly(Return());
+        EXPECT_CALL(*_mockHeuristicPlugin, createPolicyDescriptor(mockHandle))
+            .WillRepeatedly(Return(mockDescriptor));
+        EXPECT_CALL(*_mockHeuristicPlugin, destroyPolicyDescriptor(mockDescriptor))
+            .WillRepeatedly(Return());
+
+        // Store engine IDs when setEngineIds is called
+        EXPECT_CALL(*_mockHeuristicPlugin, setEngineIds(mockDescriptor, _, _))
+            .WillRepeatedly([this](hipdnnHeuristicPolicyDescriptor_t,
+                                   const int64_t* engineIds,
+                                   size_t engineIdCount) {
+                _mockStoredEngineIds.assign(engineIds, engineIds + engineIdCount);
+            });
+
+        EXPECT_CALL(*_mockHeuristicPlugin, setSerializedGraph(mockDescriptor, _))
+            .WillRepeatedly(Return());
+        EXPECT_CALL(*_mockHeuristicPlugin, finalize(mockDescriptor))
+            .WillRepeatedly(Return(true)); // Always succeed
+
+        // Return the same engine IDs that were set
+        EXPECT_CALL(*_mockHeuristicPlugin, getSortedEngineIds(mockDescriptor))
+            .WillRepeatedly([this]() { return _mockStoredEngineIds; });
     }
 
 protected:
@@ -86,8 +153,11 @@ protected:
     std::unique_ptr<HipdnnBackendDescriptor> _mockGraphWrapper = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _mockGraphBadTypeWrapper = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _mockWrongTypeWrapper = nullptr;
-    std::unique_ptr<MockHandle> _mockHandle = nullptr;
-    std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
+    std::unique_ptr<NiceMock<MockHandle>> _mockHandle = nullptr;
+    std::shared_ptr<NiceMock<MockEnginePluginResourceManager>> _mockEnginePluginResourceManager = nullptr;
+    std::shared_ptr<NiceMock<MockHeuristicPluginResourceManager>> _mockHeuristicPluginResourceManager = nullptr;
+    std::shared_ptr<NiceMock<MockHeuristicPlugin>> _mockHeuristicPlugin = nullptr;
+    mutable std::vector<int64_t> _mockStoredEngineIds;
 
     void SetUp() override
     {
@@ -95,19 +165,26 @@ protected:
         _mockGraphWrapper = createDescriptor<MockGraphDescriptor>();
         _mockGraphBadTypeWrapper = createDescriptor<MockGraphDescriptor>();
         _mockWrongTypeWrapper = createDescriptor<MockDescriptor<EngineHeuristicDescriptor>>();
-        _mockHandle = std::make_unique<MockHandle>();
-        _mockEnginePluginResourceManager = std::make_shared<MockEnginePluginResourceManager>();
+        _mockHandle = std::make_unique<NiceMock<MockHandle>>();
+        _mockEnginePluginResourceManager = std::make_shared<NiceMock<MockEnginePluginResourceManager>>();
+        _mockHeuristicPluginResourceManager = std::make_shared<NiceMock<MockHeuristicPluginResourceManager>>();
+        _mockHeuristicPlugin = std::make_shared<NiceMock<MockHeuristicPlugin>>();
     }
 
     void TearDown() override
     {
+        // Destroy descriptor before mocks to ensure proper cleanup order
+        _engineHeuristicWrapper.reset();
+        _mockGraphWrapper.reset();
+        _mockGraphBadTypeWrapper.reset();
+        _mockWrongTypeWrapper.reset();
         _engineDetailBuffers.clear();
     }
 
     hipdnnPluginConstData_t serializeEngineDetails(int64_t gidx)
     {
         flatbuffers::FlatBufferBuilder builder;
-        hipdnn_flatbuffers_sdk::data_objects::EngineDetailsBuilder engineDetailsBuilder(builder);
+        hipdnn_data_sdk::data_objects::EngineDetailsBuilder engineDetailsBuilder(builder);
         engineDetailsBuilder.add_engine_id(gidx);
         builder.Finish(engineDetailsBuilder.Finish());
         auto engineDetailsBuffer = builder.Release();

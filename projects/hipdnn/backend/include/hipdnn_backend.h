@@ -331,25 +331,25 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
  * @param [in]  serializedGraph   Pointer to the serialized graph data in a byte array.
  * @param [in]  graphByteSize     Size of the serialized graph in bytes.
  *
- * @retval HIPDNN_STATUS_SUCCESS                The graph was successfully deserialized and stored in the descriptor.
- * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  descriptor or serializedGraph is null.
- * @retval HIPDNN_STATUS_BAD_PARAM               graphByteSize is zero.
- * @retval HIPDNN_STATUS_ALLOC_FAILED            Memory allocation for the descriptor or graph failed.
- * @retval HIPDNN_STATUS_INTERNAL_ERROR          An internal error occurred during deserialization.
+ * @retval HIPDNN_STATUS_SUCCESS           The graph was successfully deserialized and stored in the descriptor.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid or inconsistent parameter values were encountered, such as:
+ *                                         - descriptor is null.
+ *                                         - serializedGraph is null.
+ *                                         - graphByteSize is zero.
+ * @retval HIPDNN_STATUS_ALLOC_FAILED      Memory allocation for the descriptor or graph failed.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred during deserialization.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
     hipdnnBackendDescriptor_t* descriptor, const uint8_t* serializedGraph, size_t graphByteSize);
 
 /*!
- * @brief Retrieves the binary-serialized graph from an operation graph descriptor.
+ * @brief Retrieves the binary-serialized graph from a finalized operation graph descriptor.
  *
  * Uses the standard two-call pattern: call first with @p serializedGraph set to @c nullptr to query
  * the required buffer size, then call again with a caller-allocated buffer to receive the data.
- * The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR. Finalization is not
- * required — if operations are set but the graph is not finalized, serialization builds from
- * operations directly. An empty operations list produces a valid (but empty) serialized graph.
+ * The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR and must be finalized.
  *
- * @param [in]  descriptor        An operation graph descriptor.
+ * @param [in]  descriptor        A finalized operation graph descriptor.
  * @param [in]  requestedByteSize Size of the caller-allocated buffer in bytes.
  *                                Ignored when @p serializedGraph is @c nullptr.
  * @param [out] graphByteSize     Pointer to receive the size of the serialized graph in bytes.
@@ -361,6 +361,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
  *                                            or the size query completed successfully.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  descriptor or graphByteSize is null.
  * @retval HIPDNN_STATUS_BAD_PARAM            The descriptor is not an operation graph descriptor.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED  The descriptor is not finalized.
  * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  The requestedByteSize is smaller than the
  *                                                     serialized graph size.
  * @retval HIPDNN_STATUS_INTERNAL_ERROR       An internal error occurred during serialization.
@@ -370,64 +371,6 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
                                               size_t requestedByteSize,
                                               size_t* graphByteSize,
                                               uint8_t* serializedGraph);
-
-/*!
- * @brief Retrieves the JSON-serialized graph from an operation graph descriptor.
- *
- * Uses the standard two-call pattern: call first with @p serializedJsonGraph set to @c nullptr to
- * query the required buffer size, then call again with a caller-allocated buffer to receive the
- * data. The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR. An empty
- * operations list produces a valid (but empty) serialized JSON graph.
- *
- * @param [in]  descriptor          An operation graph descriptor.
- * @param [in]  requestedByteSize   Size of the caller-allocated buffer in bytes.
- *                                  Ignored when @p serializedJsonGraph is @c nullptr.
- * @param [out] graphByteSize       Pointer to receive the size of the JSON graph in bytes.
- *                                  The reported size includes the null terminator.
- *                                  Always written on success.
- * @param [out] serializedJsonGraph Caller-allocated buffer to receive the JSON graph data,
- *                                  or @c nullptr to query the required size only.
- *
- * @retval HIPDNN_STATUS_SUCCESS                   The JSON graph was successfully retrieved,
- *                                                 or the size query completed successfully.
- * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER    descriptor or graphByteSize is null.
- * @retval HIPDNN_STATUS_BAD_PARAM                 The descriptor is not an operation graph
- *                                                 descriptor.
- * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  The requestedByteSize is smaller than the
- *                                                     JSON graph size.
- * @retval HIPDNN_STATUS_INTERNAL_ERROR            An internal error occurred during serialization.
- */
-HIPDNN_BACKEND_EXPORT hipdnnStatus_t
-    hipdnnBackendGetSerializedJsonGraph_ext(hipdnnBackendDescriptor_t descriptor,
-                                            size_t requestedByteSize,
-                                            size_t* graphByteSize,
-                                            char* serializedJsonGraph);
-
-/*!
- * @brief Creates and deserializes a graph from a JSON string into a backend descriptor.
- *
- * This function creates a backend descriptor and deserializes a graph from a JSON string
- * into the descriptor. The JSON is internally converted to binary and processed using the
- * standard deserialization path.
- *
- * @param [out] descriptor    Pointer to a backend descriptor where the deserialized graph will
- *                            be stored.
- * @param [in]  jsonGraph     Pointer to the JSON graph data as a character array. Does not need
- *                            to be null-terminated; the jsonByteSize parameter controls the
- *                            parsing length.
- * @param [in]  jsonByteSize  Size of the JSON graph in bytes.
- *                            May include or exclude the null terminator; the parser
- *                            handles both cases.
- *
- * @retval HIPDNN_STATUS_SUCCESS                The graph was successfully deserialized and stored in
- *                                              the descriptor.
- * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  descriptor or jsonGraph is null.
- * @retval HIPDNN_STATUS_BAD_PARAM               jsonByteSize is zero.
- * @retval HIPDNN_STATUS_ALLOC_FAILED            Memory allocation for the descriptor or graph failed.
- * @retval HIPDNN_STATUS_INTERNAL_ERROR          An internal error occurred during deserialization.
- */
-HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeJsonGraph_ext(
-    hipdnnBackendDescriptor_t* descriptor, const char* jsonGraph, size_t jsonByteSize);
 
 /*!
  * @brief Callback function for logging messages.
@@ -636,6 +579,64 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                                                              size_t* versionLen,
                                                              char* type,
                                                              size_t* typeLen);
+
+/**
+ * @brief Gets the count of loaded heuristic policies.
+ *
+ * RFC 0007 Section 16: Returns the number of heuristic policy plugins that have been
+ * successfully loaded and validated by the backend. This count includes all policies
+ * available for use in the outer loop engine selection.
+ *
+ * @param[in]  handle       A valid hipDNN handle.
+ * @param[out] numPolicies  Pointer where the policy count will be stored.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle or null pointer.
+ *
+ * @see hipdnnGetHeuristicPolicyInfo_ext for retrieving individual policy metadata
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHandle_t handle,
+                                                                        size_t* numPolicies);
+
+/**
+ * @brief Gets information about a loaded heuristic policy by index.
+ *
+ * RFC 0007 Section 16: Retrieves metadata for a heuristic policy plugin, including
+ * policy ID, policy name, plugin version, and API version. Policies are enumerated
+ * in the order they appear in the default policy list.
+ *
+ * This function uses a two-call pattern for string fields:
+ * 1. First call: Pass all string buffers as `nullptr` to query required sizes.
+ *    - Sets `policyNameLen`, `pluginVersionLen`, and `apiVersionLen` to the required
+ *      buffer sizes (including null terminator).
+ *
+ * 2. Second call: Pass allocated buffers with sizes set from the first call.
+ *
+ * @param[in]     handle            A valid hipDNN handle.
+ * @param[in]     policyIndex       Zero-based index of the policy to query.
+ * @param[out]    policyId          Pointer where the policy ID will be stored, or `nullptr` to skip.
+ * @param[out]    policyName        Buffer for the policy name, or `nullptr` to query size.
+ * @param[in,out] policyNameLen     Pointer to buffer size; updated with required size.
+ * @param[out]    pluginVersion     Buffer for the plugin version, or `nullptr` to query size.
+ * @param[in,out] pluginVersionLen  Pointer to buffer size; updated with required size.
+ * @param[out]    apiVersion        Buffer for the API version, or `nullptr` to query size.
+ * @param[in,out] apiVersionLen     Pointer to buffer size; updated with required size.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle, null pointers, or out-of-range index.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    Internal error.
+ *
+ * @see hipdnnGetHeuristicPolicyCount_ext for getting the total policy count
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHandle_t handle,
+                                                                       size_t policyIndex,
+                                                                       int64_t* policyId,
+                                                                       char* policyName,
+                                                                       size_t* policyNameLen,
+                                                                       char* pluginVersion,
+                                                                       size_t* pluginVersionLen,
+                                                                       char* apiVersion,
+                                                                       size_t* apiVersionLen);
 
 /**
  * @brief Returns hipdnn backend version string. Returns an error if nullptr is passed

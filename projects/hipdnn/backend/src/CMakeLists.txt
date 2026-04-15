@@ -54,6 +54,7 @@ add_library(
     logging/Logging.cpp
     FlatbufferUtilities.cpp
     heuristics/DeviceProperties.cpp
+    heuristics/SelectionHeuristic.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
     plugin/HeuristicPlugin.cpp
