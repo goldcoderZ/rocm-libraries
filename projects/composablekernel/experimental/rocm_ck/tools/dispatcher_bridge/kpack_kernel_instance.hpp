@@ -23,6 +23,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <mutex>
@@ -74,14 +75,6 @@ class KpackKernelInstance : public ck_tile::dispatcher::KernelInstance
               const ck_tile::dispatcher::Problem& problem,
               void* stream) const override
     {
-        // D tensor fusion not wired through Args yet — reject any kernel that
-        // expects D tensors, regardless of whether the caller provided pointers.
-        if(spec_.numDTensors() > 0)
-            throw std::runtime_error("KpackKernelInstance: kernel '" + name_ + "' expects " +
-                                     std::to_string(spec_.numDTensors()) +
-                                     " D tensor(s) — D tensor fusion not implemented yet");
-        (void)d_ptrs;
-
         // Thread-safe lazy kernel loading
         std::call_once(load_flag_, [this]() {
             kernel_.emplace();
@@ -104,6 +97,28 @@ class KpackKernelInstance : public ck_tile::dispatcher::KernelInstance
             b_ptr, makeShape(problem.K, problem.N), makeStrides(b_sk, b_sn)};
         kernel_args.tensors[spec_.output().args_slot] = {
             c_ptr, makeShape(problem.M, problem.N), makeStrides(c_sm, c_sn)};
+
+        // D tensors (bias, residual add) — same [M, N] shape as output
+        int num_d = spec_.numDTensors();
+        if(num_d > 0)
+        {
+            if(d_ptrs == nullptr)
+                throw std::runtime_error("KpackKernelInstance: kernel '" + name_ + "' expects " +
+                                         std::to_string(num_d) + " D tensor(s) but d_ptrs is null");
+
+            auto [d_sm, d_sn] = layoutStrides(spec_.output().layout, problem.M, problem.N);
+
+            for(int i = 0; i < num_d; ++i)
+            {
+                if(d_ptrs[i] == nullptr)
+                    throw std::runtime_error("KpackKernelInstance: d_ptrs[" + std::to_string(i) +
+                                             "] is null for kernel '" + name_ + "'");
+
+                auto d_tensor                           = spec_.physical_tensors[3 + i];
+                kernel_args.tensors[d_tensor.args_slot] = {
+                    d_ptrs[i], makeShape(problem.M, problem.N), makeStrides(d_sm, d_sn)};
+            }
+        }
 
         // Grid dimensions — partitioner-dependent
         int grid_m = (problem.M + spec_.block_tile.m - 1) / spec_.block_tile.m;
@@ -165,8 +180,6 @@ class KpackKernelInstance : public ck_tile::dispatcher::KernelInstance
                   const ck_tile::dispatcher::Problem& problem,
                   float tolerance) const override
     {
-        (void)d_ptrs; // D tensors not wired — validation is for basic GEMM only
-
         int M = static_cast<int>(problem.M);
         int N = static_cast<int>(problem.N);
         int K = static_cast<int>(problem.K);
@@ -200,6 +213,30 @@ class KpackKernelInstance : public ck_tile::dispatcher::KernelInstance
                     sum += h_a[m * a_sm + k * a_sk] * h_b[k * b_sk + n * b_sn];
                 ref[m * c_sm + n * c_sn] = sum;
             }
+
+        // Apply fused epilogue to CPU reference
+        int num_d = spec_.numDTensors();
+        if(num_d > 0 && d_ptrs != nullptr)
+        {
+            auto h_d0 = downloadAsFloat(d_ptrs[0], spec_.d0().dtype, M * N);
+
+            if(spec_.hasEpilogueOp(EpilogueOp::Add) && spec_.hasEpilogueOp(EpilogueOp::Relu))
+            {
+                for(int i = 0; i < M * N; ++i)
+                    ref[i] = std::fmax(0.0f, ref[i] + h_d0[i]);
+            }
+            else if(spec_.hasEpilogueOp(EpilogueOp::Add) && num_d >= 2)
+            {
+                auto h_d1 = downloadAsFloat(d_ptrs[1], spec_.d1().dtype, M * N);
+                for(int i = 0; i < M * N; ++i)
+                    ref[i] = ref[i] + h_d0[i] + h_d1[i];
+            }
+            else if(spec_.hasEpilogueOp(EpilogueOp::Add))
+            {
+                for(int i = 0; i < M * N; ++i)
+                    ref[i] = ref[i] + h_d0[i];
+            }
+        }
 
         auto vr = verify(h_c.data(), ref.data(), M * N, tolerance);
         if(!vr.passed)

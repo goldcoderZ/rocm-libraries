@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -124,17 +125,6 @@ int main(int argc, char** argv)
             continue;
         }
 
-        // Skip multi-D kernels — D tensor fusion not wired yet
-        if(spec.numDTensors() > 0)
-        {
-            std::printf("[%d] %s\n    skip: needs %d D tensor(s) (fusion not supported)\n",
-                        num,
-                        kernel->get_name().c_str(),
-                        spec.numDTensors());
-            ++skipped;
-            continue;
-        }
-
         std::printf("[%d] %s\n", num, kernel->get_name().c_str());
         std::fflush(stdout);
 
@@ -148,6 +138,15 @@ int main(int argc, char** argv)
             for(int i = 0; i < K * N; ++i)
                 h_b[i] = static_cast<float>(i % 8);
 
+            // D tensor test data (small values for exact accumulation)
+            int num_d = spec.numDTensors();
+            std::vector<float> h_d0(num_d >= 1 ? M * N : 0);
+            std::vector<float> h_d1(num_d >= 2 ? M * N : 0);
+            for(int i = 0; i < static_cast<int>(h_d0.size()); ++i)
+                h_d0[i] = static_cast<float>(i % 4);
+            for(int i = 0; i < static_cast<int>(h_d1.size()); ++i)
+                h_d1[i] = static_cast<float>(i % 3);
+
             // CPU reference (layout-aware)
             auto [a_sm, a_sk] = rocm_ck::layoutStrides(spec.lhs().layout, M, K);
             auto [b_sk, b_sn] = rocm_ck::layoutStrides(spec.rhs().layout, K, N);
@@ -156,6 +155,24 @@ int main(int argc, char** argv)
             std::vector<float> ref_c(M * N, 0.0f);
             cpuGemm(
                 h_a.data(), h_b.data(), ref_c.data(), M, N, K, a_sm, a_sk, b_sk, b_sn, c_sm, c_sn);
+
+            // Apply fused epilogue to CPU reference
+            if(spec.hasEpilogueOp(rocm_ck::EpilogueOp::Add) &&
+               spec.hasEpilogueOp(rocm_ck::EpilogueOp::Relu))
+            {
+                for(int i = 0; i < M * N; ++i)
+                    ref_c[i] = std::fmax(0.0f, ref_c[i] + h_d0[i]);
+            }
+            else if(spec.hasEpilogueOp(rocm_ck::EpilogueOp::Add) && num_d >= 2)
+            {
+                for(int i = 0; i < M * N; ++i)
+                    ref_c[i] = ref_c[i] + h_d0[i] + h_d1[i];
+            }
+            else if(spec.hasEpilogueOp(rocm_ck::EpilogueOp::Add))
+            {
+                for(int i = 0; i < M * N; ++i)
+                    ref_c[i] = ref_c[i] + h_d0[i];
+            }
 
             // Allocate and upload GPU buffers
             rocm_ck::TypedBuffer buf_a(spec.lhs().dtype, M * K);
@@ -166,9 +183,29 @@ int main(int argc, char** argv)
             buf_b.upload(h_b.data());
             buf_c.zero();
 
+            // D tensor GPU buffers
+            std::unique_ptr<rocm_ck::TypedBuffer> buf_d0;
+            std::unique_ptr<rocm_ck::TypedBuffer> buf_d1;
+            std::vector<const void*> d_ptr_vec;
+
+            if(num_d >= 1)
+            {
+                buf_d0 = std::make_unique<rocm_ck::TypedBuffer>(spec.d0().dtype, M * N);
+                buf_d0->upload(h_d0.data());
+                d_ptr_vec.push_back(buf_d0->ptr());
+            }
+            if(num_d >= 2)
+            {
+                buf_d1 = std::make_unique<rocm_ck::TypedBuffer>(spec.d1().dtype, M * N);
+                buf_d1->upload(h_d1.data());
+                d_ptr_vec.push_back(buf_d1->ptr());
+            }
+
+            const void** d_ptrs = d_ptr_vec.empty() ? nullptr : d_ptr_vec.data();
+
             // Run
             float time_ms =
-                kernel->run(buf_a.ptr(), buf_b.ptr(), buf_c.ptr(), nullptr, problem, nullptr);
+                kernel->run(buf_a.ptr(), buf_b.ptr(), buf_c.ptr(), d_ptrs, problem, nullptr);
 
             // Verify
             std::vector<float> result(M * N);
