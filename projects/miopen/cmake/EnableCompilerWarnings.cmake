@@ -80,7 +80,6 @@ set(__clang_cxx_compile_options
     -Wno-c++11-narrowing
     -Wno-redundant-parens
     -Wno-format-nonliteral
-    -Wno-unused-template
     -Wno-comma
     -Wno-suggest-destructor-override
     -Wno-switch-enum
