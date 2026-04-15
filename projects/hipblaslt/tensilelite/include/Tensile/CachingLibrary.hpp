@@ -27,10 +27,17 @@
 #pragma once
 
 #include <atomic>
+#include <cstdlib>
+#include <limits>
+#include <list>
 #include <shared_mutex>
+#include <tuple>
 #include <unordered_map>
+#include <utility>
 
+#include <Tensile/Comparison.hpp>
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/Debug.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 #include <Tensile/AMDGPU_Detail.hpp>
@@ -39,41 +46,103 @@
 
 namespace TensileLite
 {
-    template <typename Value, typename Key, typename... Keys>
-    struct MultiLevelMap
+    /**
+     * Sentinel: unbounded cache (no LRU eviction). Not a valid LRU cap.
+     */
+    inline constexpr size_t CacheMapUnlimitedEntries = std::numeric_limits<size_t>::max();
+
+    /**
+     * Read cache cap from HIPBLASLT_CACHE_MAP_MAX_ENTRIES or
+     * TENSILE_CACHE_MAP_MAX_ENTRIES (HIP name wins if both set).
+     *
+     * When unset: unlimited entries (same as CacheMapUnlimitedEntries).
+     *
+     * Parsed as signed base-10:
+     *      0: disable caching (find always misses, add is no-op)
+     *     -1: unlimited (any negative is treated the same)
+     *  N > 0: LRU cap of N leaf entries
+     */
+    inline size_t cacheMapMaxLeafEntriesFromEnv()
     {
-        using type = typename MultiLevelMap<std::unordered_map<Key, Value>, Keys...>::type;
+        static const size_t limit = []() -> size_t {
+            const char* e = std::getenv("HIPBLASLT_CACHE_MAP_MAX_ENTRIES");
+
+            if(!e || *e == '\0')
+            {
+                e = std::getenv("TENSILE_CACHE_MAP_MAX_ENTRIES");
+            }
+
+            if(e && *e != '\0')
+            {
+                char*     end = nullptr;
+                long long v   = std::strtoll(e, &end, 10);
+
+                if(end != e)
+                {
+                    if(v == 0)
+                        return 0;
+                    if(v < 0)
+                        return CacheMapUnlimitedEntries;
+                    return static_cast<size_t>(v);
+                }
+            }
+
+            return CacheMapUnlimitedEntries;
+        }();
+
+        return limit;
+    }
+
+    template <typename Head, typename... Tail>
+    struct ReversedKeyTuple
+    {
+        using type = decltype(std::tuple_cat(
+            std::declval<typename ReversedKeyTuple<Tail...>::type const&>(),
+            std::declval<std::tuple<Head> const&>()));
     };
 
-    template <typename Value, typename Key>
-    struct MultiLevelMap<Value, Key>
+    template <typename Single>
+    struct ReversedKeyTuple<Single>
     {
-        using type = std::unordered_map<Key, Value>;
+        using type = std::tuple<Single>;
+    };
+
+    template <typename KeyTuple>
+    struct CacheKeyTupleHash;
+
+    template <typename... Ts>
+    struct CacheKeyTupleHash<std::tuple<Ts...>>
+    {
+        size_t operator()(std::tuple<Ts...> const& t) const noexcept
+        {
+            return std::apply(
+                [](auto const&... args) { return hash_combine(args...); }, t);
+        }
     };
 
     /**
-     * Thread-safe multi-valued cache.
+     * Thread-safe flat cache with optional LRU eviction on the number of leaf
+     * entries. Keys are passed to find() / add() in the same order as before
+     * (opposite of the template parameter list); see legacy CacheMap comment.
      *
-     * Note that due to a quirk with templates, the order of the keys in find() and add() is *opposite* of that in the type.
-     *
-     * e.g.
-     *
-     *     CacheMap<int, float, std::string> myCache
-     *     myCache.find("foo", 1.4); // great
-     *     myCache.find(1.4, "foo"); // error!
+     * maxLeafEntries:
+     *   0: caching disabled (find always returns nullValue; add does nothing)
+     *   CacheMapUnlimitedEntries: no eviction (unbounded)
+     *   otherwise: LRU cap of maxLeafEntries entries
      */
     template <typename Value, typename... Keys>
     class CacheMap
     {
-        using Map = typename MultiLevelMap<Value, Keys...>::type;
+        using KeyTuple = typename ReversedKeyTuple<Keys...>::type;
+        using Hash     = CacheKeyTupleHash<KeyTuple>;
 
     public:
-        CacheMap(Value const& nullValue)
+        CacheMap(Value const& nullValue, size_t maxLeafEntries = CacheMapUnlimitedEntries)
             : m_nullValue(nullValue)
+            , m_maxLeafEntries(maxLeafEntries)
             , m_lookupEfficiency(Debug::Instance().printLookupEfficiency())
             , m_lookups(0)
             , m_hits(0)
-
         {
         }
 
@@ -87,66 +156,117 @@ namespace TensileLite
         template <typename... Ks>
         Value find(Ks const&... keys)
         {
-            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
+            if(m_maxLeafEntries == 0)
+            {
+                if(m_lookupEfficiency)
+                    m_lookups++;
+                return m_nullValue;
+            }
 
-            auto rv = find_impl(m_map, keys...);
+            KeyTuple const key(keys...);
+
+            if(m_maxLeafEntries == CacheMapUnlimitedEntries)
+            {
+                std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
+                auto                                      rv = findInMapUnlocked(key);
+
+                if(m_lookupEfficiency)
+                {
+                    m_lookups++;
+                    if(rv != m_nullValue)
+                        m_hits++;
+                }
+                return rv;
+            }
+
+            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+            auto                                     it = m_map.find(key);
+            if(it == m_map.end())
+            {
+                if(m_lookupEfficiency)
+                {
+                    m_lookups++;
+                }
+                return m_nullValue;
+            }
+
+            touchUnlocked(key);
 
             if(m_lookupEfficiency)
             {
                 m_lookups++;
-                if(rv != m_nullValue)
+                if(it->second != m_nullValue)
                     m_hits++;
             }
 
-            return rv;
+            return it->second;
         }
 
         template <typename... Ks>
         void add(Value const& value, Ks const&... ks)
         {
+            if(m_maxLeafEntries == 0)
+                return;
+
+            KeyTuple key(ks...);
+
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
 
-            add_impl(m_map, value, ks...);
+            if(m_maxLeafEntries == CacheMapUnlimitedEntries)
+            {
+                m_map.insert_or_assign(key, value);
+                return;
+            }
+
+            auto it = m_map.find(key);
+            if(it != m_map.end())
+            {
+                it->second = value;
+                touchUnlocked(key);
+                return;
+            }
+
+            while(m_map.size() >= m_maxLeafEntries)
+                evictLruUnlocked();
+
+            m_map.emplace(key, value);
+            m_lru.push_back(key);
+            m_lruPos[key] = std::prev(m_lru.end());
         }
 
     private:
-        template <typename SubMap, typename K>
-        Value find_impl(SubMap const& map, K const& key)
+        Value findInMapUnlocked(KeyTuple const& key)
         {
-            auto iter = map.find(key);
-
-            if(iter == map.end())
+            auto it = m_map.find(key);
+            if(it == m_map.end())
                 return m_nullValue;
-
-            return iter->second;
+            return it->second;
         }
 
-        template <typename SubMap, typename K, typename... Ks>
-        Value find_impl(SubMap const& map, K const& key, Ks const&... ks)
+        void touchUnlocked(KeyTuple const& key)
         {
-            auto iter = map.find(key);
-
-            if(iter == map.end())
-                return m_nullValue;
-
-            return find_impl(iter->second, ks...);
+            auto i = m_lruPos.find(key);
+            if(i != m_lruPos.end())
+                m_lru.splice(m_lru.end(), m_lru, i->second);
         }
 
-        template <typename SubMap, typename K>
-        void add_impl(SubMap& map, Value const& value, K const& key)
+        void evictLruUnlocked()
         {
-            map.insert_or_assign(key, value);
+            if(m_lru.empty())
+                return;
+            KeyTuple victim = m_lru.front();
+            m_lru.pop_front();
+            m_lruPos.erase(victim);
+            m_map.erase(victim);
         }
 
-        template <typename SubMap, typename K, typename... Ks>
-        void add_impl(SubMap& map, Value const& value, K const& key, Ks const&... ks)
-        {
-            add_impl(map[key], value, ks...);
-        }
+        std::unordered_map<KeyTuple, Value, Hash> m_map;
+        std::list<KeyTuple>                       m_lru;
+        std::unordered_map<KeyTuple, typename std::list<KeyTuple>::iterator, Hash> m_lruPos;
 
-        Map                     m_map;
         std::shared_timed_mutex m_mutex;
         Value                   m_nullValue;
+        size_t                  m_maxLeafEntries;
 
         bool                 m_lookupEfficiency;
         std::atomic<int64_t> m_lookups;
@@ -167,10 +287,12 @@ namespace TensileLite
 
         CachingLibrary(std::shared_ptr<Library> subLibrary)
             : m_subLibrary(subLibrary)
-            , m_cache(std::make_tuple(nullptr, std::numeric_limits<double>::max()))
-            , m_caches(SolutionVector<MySolution>{})
-            , m_cachesAllSolutions(false)
-            , m_cachesGroupedGemm(SolutionVector<MySolution>{})
+            , m_cache(std::make_tuple(nullptr, std::numeric_limits<double>::max()),
+                      cacheMapMaxLeafEntriesFromEnv())
+            , m_caches(SolutionVector<MySolution>{}, cacheMapMaxLeafEntriesFromEnv())
+            , m_cachesAllSolutions(false, cacheMapMaxLeafEntriesFromEnv())
+            , m_cachesGroupedGemm(SolutionVector<MySolution>{},
+                                  cacheMapMaxLeafEntriesFromEnv())
         {
         }
 
