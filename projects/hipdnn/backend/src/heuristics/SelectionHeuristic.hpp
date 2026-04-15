@@ -35,7 +35,7 @@ namespace hipdnn_backend::heuristics
  * Lifecycle: Owned by EngineHeuristicDescriptor, one per resolved policy slot.
  * Created when the policy list is established, destroyed with the descriptor.
  *
- * RFC Reference: Section 7
+ * RFC 0007 Reference: Section 7
  */
 class SelectionHeuristic
 {
