@@ -59,13 +59,12 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
 
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
-        using WarpTile        = typename Problem::BlockGemmShape::WarpTile;
         using WarpGemm        = WarpGemmDispatcher<ADataType,
                                                    BDataType,
                                                    typename Problem::CDataType,
-                                                   WarpTile::at(I0),
-                                                   WarpTile::at(I1),
-                                                   WarpTile::at(I2),
+                                                   MPerXdl,
+                                                   NPerXdl,
+                                                   KPerXdl,
                                                    Problem::TransposeC>;
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ADataType,
                                                                       BDataType,

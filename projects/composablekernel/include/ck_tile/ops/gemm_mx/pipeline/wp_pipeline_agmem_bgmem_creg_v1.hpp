@@ -105,15 +105,9 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
     static constexpr auto Scheduler           = GemmPipelineScheduler::Intrawave;
 
-    static constexpr auto I0   = number<0>();
-    static constexpr auto I1   = number<1>();
-    static constexpr auto I2   = number<2>();
-    static constexpr auto idxM = I0;
-    static constexpr auto idxN = I1;
-    static constexpr auto idxK = I2;
-    using BlockTile            = remove_cvref_t<typename BlockGemmShape::BlockTile>;
-    using BlockWarps           = remove_cvref_t<typename BlockGemmShape::BlockWarps>;
-    using WarpTile             = remove_cvref_t<typename BlockGemmShape::WarpTile>;
+    using BlockTile  = remove_cvref_t<typename BlockGemmShape::BlockTile>;
+    using BlockWarps = remove_cvref_t<typename BlockGemmShape::BlockWarps>;
+    using WarpTile   = remove_cvref_t<typename BlockGemmShape::WarpTile>;
 
     static constexpr index_t MWarp = BlockGemm::MWarp;
     static constexpr index_t NWarp = BlockGemm::NWarp;
@@ -273,25 +267,27 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
 
             auto scale_a_dram_window = make_tile_window(
                 scale_a_window.get_bottom_tensor_view(),
-                make_tuple(number<MWarp * WarpGemm::kM>{}, number<64 / WarpGemm::kM>{}),
+                make_tuple(number<MWarp * WarpGemm::kM>{}, number<WaveSize / WarpGemm::kM>{}),
                 scale_a_window.get_window_origin(),
                 PipelinePolicy::template MakeMX_ScaleA_FlatDramTileDistribution<Problem>());
             const auto scale_a_dram_step_m =
                 amd_wave_read_first_lane(scale_a_dram_window.get_load_offset(
                     tuple<number<MWarp * WarpGemm::kM>, number<0>>{}));
-            const auto scale_a_dram_step_k = amd_wave_read_first_lane(
-                scale_a_dram_window.get_load_offset(tuple<number<0>, number<64 / WarpGemm::kM>>{}));
+            const auto scale_a_dram_step_k =
+                amd_wave_read_first_lane(scale_a_dram_window.get_load_offset(
+                    tuple<number<0>, number<WaveSize / WarpGemm::kM>>{}));
 
             auto scale_b_dram_window = make_tile_window(
                 scale_b_window.get_bottom_tensor_view(),
-                make_tuple(number<NWarp * WarpGemm::kN>{}, number<64 / WarpGemm::kN>{}),
+                make_tuple(number<NWarp * WarpGemm::kN>{}, number<WaveSize / WarpGemm::kN>{}),
                 scale_b_window.get_window_origin(),
                 PipelinePolicy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
             const auto scale_b_dram_step_n =
                 amd_wave_read_first_lane(scale_b_dram_window.get_load_offset(
                     tuple<number<NWarp * WarpGemm::kN>, number<0>>{}));
-            const auto scale_b_dram_step_k = amd_wave_read_first_lane(
-                scale_b_dram_window.get_load_offset(tuple<number<0>, number<64 / WarpGemm::kN>>{}));
+            const auto scale_b_dram_step_k =
+                amd_wave_read_first_lane(scale_b_dram_window.get_load_offset(
+                    tuple<number<0>, number<WaveSize / WarpGemm::kN>>{}));
 
             statically_indexed_array<
                 statically_indexed_array<decltype(load_tile(scale_a_dram_window)),
@@ -324,7 +320,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                         impack * scale_a_dram_step_m + ikpack * scale_a_dram_step_k);
                 });
             });
-            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
 
             static_for<0, NPackIterPerWarp, 1>{}([&](auto inpack) {
                 static_for<0, KPackIterPerWarp, 1>{}([&](auto ikpack) {
@@ -333,7 +329,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                         inpack * scale_b_dram_step_n + ikpack * scale_b_dram_step_k);
                 });
             });
-            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
             __builtin_amdgcn_sched_barrier(0);
 
             if constexpr(HasHotLoop || TailNum == TailNumber::Even)
@@ -393,8 +389,10 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 Base::GlobalPrefetchAsync(
                     a_store_lds_window_ping, a_dram_window, a_dram_tile_window_step);
 
-                move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
-                move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+                move_tile_window(scale_a_dram_window,
+                                 {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
+                move_tile_window(scale_b_dram_window,
+                                 {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
 
                 block_gemm.LocalPrefetch(a_load_windows_pong);
                 HotLoopScheduler();
@@ -436,8 +434,10 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
 
                 Base::GlobalPrefetchAsync(
                     a_store_lds_window_pong, a_dram_window, a_dram_tile_window_step);
-                move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
-                move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+                move_tile_window(scale_a_dram_window,
+                                 {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
+                move_tile_window(scale_b_dram_window,
+                                 {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
 
                 block_gemm.LocalPrefetch(a_load_windows_ping);
                 HotLoopScheduler();

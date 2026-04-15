@@ -61,22 +61,19 @@ struct BlockMXGemmASmemBRegCReg
 
         if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<NWarp>,
-                    tuple<sequence<MWarp, MXdlPack, WarpGemm::kM>,
-                          sequence<K_Lane, AK1 / numeric_traits<ADataType>::PackedSize>>,
-                    tuple<sequence<1, 0>, sequence<2, 1>>,
-                    tuple<sequence<0, 0>, sequence<0, 2>>,
-                    sequence<2>,
-                    sequence<1>>{});
+                tile_distribution_encoding<sequence<NWarp>,
+                                           tuple<sequence<MWarp, MXdlPack, WarpGemm::kM>,
+                                                 sequence<K_Lane, AK1 / APackedSize>>,
+                                           tuple<sequence<1, 0>, sequence<2, 1>>,
+                                           tuple<sequence<0, 0>, sequence<0, 2>>,
+                                           sequence<2>,
+                                           sequence<1>>{});
         else if constexpr(std::is_same_v<ADataType, fp8_t>)
             return make_static_tile_distribution(
                 tile_distribution_encoding<
                     sequence<NWarp>,
                     tuple<sequence<MWarp, MXdlPack, WarpGemm::kM>,
-                          sequence<K_Thread / AK1,
-                                   K_Lane,
-                                   AK1 / numeric_traits<ADataType>::PackedSize>>,
+                          sequence<K_Thread / AK1, K_Lane, AK1 / APackedSize>>,
                     tuple<sequence<1, 0>, sequence<2, 1>>,
                     tuple<sequence<0, 0>, sequence<1, 2>>,
                     sequence<2, 2>,
