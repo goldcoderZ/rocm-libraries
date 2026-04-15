@@ -1326,13 +1326,6 @@ class Solution(collections.abc.Mapping):
       state["DirectToLdsA"] = False
       state["DirectToLdsB"] = False
       state["_UseSgprForGRO"] = False
-      if state["PrefetchGlobalRead"] >= 2:
-        reject(state, printRejectionReason, "BufferLoad=0 does not support PrefetchGlobalRead>=2")
-        return
-
-      if problemType["UseBias"]:
-        reject(state, printRejectionReason, "BufferLoad=0 does not support UseBias due to no suppress no load.")
-        return
 
     #These modes only work under certain conditions, apply them here:
     #  - The "NoLoad" loop is only generated if PrefetchGlobalRead>0
@@ -3714,8 +3707,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "GlobalSplitU > 1 only compatible with MultipleBuffer")
       if len(state["PackedC1IndicesX"]) > 1:
         reject(state, printRejectionReason, "Use E does not support len(PackedC1IndicesX) > 1.")
-      if not state["BufferStore"]:
-        reject(state, printRejectionReason, "Use E only supports BufferStore due to no suppress no store.")
       if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1):
         reject(state, printRejectionReason, "Use E does not support StoreRemapVectorWidth if GSU == 1.")
       if state["GroupLoadStore"]:
@@ -3736,8 +3727,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "GlobalSplitU > 1 only compatible with MultipleBuffer for bias reduction")
       if len(state["PackedC1IndicesX"]) > 1:
         reject(state, printRejectionReason, "Bias reduction does not support len(PackedC1IndicesX) > 1.")
-      if not state["BufferStore"]:
-        reject(state, printRejectionReason, "Bias reduction only supports BufferStore due to no suppress no store.")
       if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1):
         reject(state, printRejectionReason, "Bias reduction does not support StoreRemapVectorWidth if GSU == 1.")
       if state["GroupLoadStore"]:

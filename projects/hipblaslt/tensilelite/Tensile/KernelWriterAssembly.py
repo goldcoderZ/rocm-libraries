@@ -48,7 +48,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   DSLoadB16, DSLoadB32, DSLoadB64, DSLoadU16, DSStoreB128, DSStoreB16, DSStoreB32, \
   DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, FlatLoadB64, \
   FlatLoadD16B16, FlatLoadD16HIB16, FlatStoreB128, FlatStoreB32, FlatStoreB64, \
-  FlatStoreD16B16, FlatStoreD16HIB16, MFMAInstruction, MUBUFReadInstruction, \
+  FlatStoreD16B16, FlatStoreD16HIB16, GlobalReadInstruction, MFMAInstruction, MUBUFReadInstruction, \
   MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAndB32, \
   SAndB64, SAndN2B32, SAtomicDec, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
   SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCmpEQI32, \
@@ -61,7 +61,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
   VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpLeI32, VCmpLtI32, \
-  VCmpLtU32, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, \
+  VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, \
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
@@ -12282,17 +12282,19 @@ class KernelWriterAssembly(KernelWriter):
       vectorDataTypes = VectorDataTypes()
       if (kernel["ProblemType"]["UseScaleAlphaVec"]) and isSingleKernel:
         labelStr = self.labels.getNameInc("ScaleAlphaVec")
-        if self.states.FactorDim == 3:
-          with self.allocTmpSgpr(1,1) as tmpSgprRes:
-            tmpSgpr = tmpSgprRes.idx
-            module.add(SCmpKEQU32(src=sgpr("FactorDim"), simm16=0, comment="FactorDim == 0"))
-            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr("SizeI"), src1=sgpr("SizeJ")))
-            module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr(tmpSgpr)))
-        elif self.states.FactorDim == 2:
-          module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeJ")))
-        else:
-          module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
-        module.add(SMulI32(dst=sgpr("SrdScaleAlphaVec+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleAlphaVec+2"), comment="ScaleAlphaVec scaled by BPE"))# scaled by BPE
+        # Init ScaleAlphaVec Srd (buffer load only; flat load uses pre-computed 64-bit address)
+        if kernel["BufferLoad"]:
+          if self.states.FactorDim == 3:
+            with self.allocTmpSgpr(1,1) as tmpSgprRes:
+              tmpSgpr = tmpSgprRes.idx
+              module.add(SCmpKEQU32(src=sgpr("FactorDim"), simm16=0, comment="FactorDim == 0"))
+              module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr("SizeI"), src1=sgpr("SizeJ")))
+              module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr(tmpSgpr)))
+          elif self.states.FactorDim == 2:
+            module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeJ")))
+          else:
+            module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
+          module.add(SMulI32(dst=sgpr("SrdScaleAlphaVec+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleAlphaVec+2"), comment="ScaleAlphaVec scaled by BPE"))# scaled by BPE
         for d in range(len(factorDims)):
           vectorDataTypes.scaleAlpha(d).dataType = kernel["ProblemType"]["ComputeDataType"]
 
@@ -12301,10 +12303,12 @@ class KernelWriterAssembly(KernelWriter):
       if ((kernel["ProblemType"]["UseScaleAB"] == "Vector")) and isSingleKernel:
         labelStrA = self.labels.getNameInc("ScaleAVec")
         labelStrB = self.labels.getNameInc("ScaleBVec")
-        module.add(allocPostLoopSrdSuppress("ScaleA", labelStrA, sgprLength=sgpr("SizeI")))
-        module.add(allocPostLoopSrdSuppress("ScaleB", labelStrB, sgprLength=sgpr("SizeJ")))
-        module.add(SMulI32(dst=sgpr("SrdScaleA+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleA+2"), comment="ScaleAVec scaled by BPE"))# scaled by BPE
-        module.add(SMulI32(dst=sgpr("SrdScaleB+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleB+2"), comment="ScaleBVec scaled by BPE"))# scaled by BPE
+        # Init ScaleABVec Srd (buffer load only; flat load uses pre-computed 64-bit address)
+        if kernel["BufferLoad"]:
+          module.add(allocPostLoopSrdSuppress("ScaleA", labelStrA, sgprLength=sgpr("SizeI")))
+          module.add(allocPostLoopSrdSuppress("ScaleB", labelStrB, sgprLength=sgpr("SizeJ")))
+          module.add(SMulI32(dst=sgpr("SrdScaleA+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleA+2"), comment="ScaleAVec scaled by BPE"))# scaled by BPE
+          module.add(SMulI32(dst=sgpr("SrdScaleB+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleB+2"), comment="ScaleBVec scaled by BPE"))# scaled by BPE
         vectorDataTypes.scaleA.dataType = kernel["ProblemType"]["ComputeDataType"]
         vectorDataTypes.scaleB.dataType = kernel["ProblemType"]["ComputeDataType"]
 
@@ -12332,7 +12336,9 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr("SizeI"), src1=sgpr(tmpSgpr)))
           # module.add(SMovB32(dst=sgpr(tmpSgpr), src=128, comment="set bias stride"))
-          module.add(allocPostLoopSrdSuppress("Bias", labelStr, sgprLength=sgpr(tmpSgpr)))
+          # Init bias Srd (buffer load only; flat load uses the pre-computed 64-bit address)
+          if kernel["BufferLoad"]:
+            module.add(allocPostLoopSrdSuppress("Bias", labelStr, sgprLength=sgpr(tmpSgpr)))
 
         loadBiasEndLabel = Label(self.labels.getNameInc("Load_Bias_End"), "")
         if self.states.FactorDim == 3:
@@ -12401,8 +12407,9 @@ class KernelWriterAssembly(KernelWriter):
           else:
             sourceAddress = "Bias"
           numRecordsStr = "SizeI" if kernel["ProblemType"]["BiasSrc"] == "A" else "SizeJ"
-          # Init bias Srd
-          module.add(allocPostLoopSrdSuppressRaw("Bias", sourceAddress, labelStr, sgprLength=sgpr(numRecordsStr)))
+          # Init bias Srd (buffer store only; flat store uses the pre-computed 64-bit address)
+          if kernel["BufferStore"]:
+            module.add(allocPostLoopSrdSuppressRaw("Bias", sourceAddress, labelStr, sgprLength=sgpr(numRecordsStr)))
           if sourceAddress == "D":
             module.add(self.undefineSgpr("AddressD"))
           multiBiasTypeLabel = []
@@ -12439,10 +12446,11 @@ class KernelWriterAssembly(KernelWriter):
           self.vgprPool.checkIn(tmpVgpr)
           module.add(skipGlobalStoreLabel)
         else:
-          # Init bias Srd
-          module.add(allocPostLoopSrdSuppress("Bias", labelStr, hex(0x80000000)))
-          ssslist.append("Bias")
-          useSize.append(True)
+          # Init bias Srd (buffer store only; flat store uses the pre-computed 64-bit address)
+          if kernel["BufferStore"]:
+            module.add(allocPostLoopSrdSuppress("Bias", labelStr, hex(0x80000000)))
+            ssslist.append("Bias")
+            useSize.append(True)
 
       if vectorDataTypes.isValid() and (not isLdsLoaded):
         if self.states.FactorDim == 3:
@@ -12533,9 +12541,11 @@ class KernelWriterAssembly(KernelWriter):
         strideE1 = "StrideE%s" % (self.states.indexChars[kernel["PackedC1IndicesX"][0]])
         module.add(VMulLOU32(dst=vgpr(self.vgprs.coutRowPtrE), src0=vgpr(self.vgprs.coutRowPtrE), src1=sgpr(strideE1), comment=" offset 1"))
         labelEStr = self.labels.getNameInc("E")
-        module.add(allocPostLoopSrdSuppress("E", labelEStr, hex(0x80000000)))
-        ssslist.append("E")
-        useSize.append(False)
+        # Init E Srd (buffer store only; flat store uses the pre-computed 64-bit address)
+        if kernel["BufferStore"]:
+          module.add(allocPostLoopSrdSuppress("E", labelEStr, hex(0x80000000)))
+          ssslist.append("E")
+          useSize.append(False)
 
       if ssslist:
         module.add(self.computeStoreSrdStart(kernel, ssslist, useSize=useSize, noMultipleBuffer=True))
@@ -13725,8 +13735,12 @@ class KernelWriterAssembly(KernelWriter):
     module        = Module("")
     tmpVgpr1      = tmpVgpr1Res.idx + dstOffset
     turn, divisor = self.getTurn(kernel, gwvw, dim)
-    addr0         = vgpr(offsetVgpr)
-    addr1         = sgpr("Srd%s"%srdName, 4)
+    if kernel["BufferLoad"]:
+      addr0 = vgpr(offsetVgpr)
+      addr1 = sgpr("Srd%s"%srdName, 4)
+    else:
+      addr0 = vgpr(offsetVgpr, 2)
+      addr1 = ""
     offset        = (divisor * gwvw) * bpe
 
     for i in range(turn):
@@ -13744,7 +13758,12 @@ class KernelWriterAssembly(KernelWriter):
     offset        = (divisor * gwvw) * self.states.bpeCinternal
 
     if setToOne:
-      module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
+      if kernel["BufferLoad"]:
+        # SRD+2 holds num records; compare to 0 to check if address is valid
+        module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
+      else:
+        # For flat addressing, check if the base pointer is non-null
+        module.add(VCmpNeU64(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Address%s"%addressStr, 2), src1=0, comment="address != 0 ?"))
       # Set maskConst to 1.0 or 1
       if kernel["ProblemType"]["ComputeDataType"].isSingle():
         maskConst = 1.0
@@ -13876,8 +13895,9 @@ class KernelWriterAssembly(KernelWriter):
     ## Scale for each component
     offsetIsInit = {}
     if biasDataType:
-      # Recalculate bias length
-      module.add(SMulI32(dst=sgpr("SrdBias+2"), src0=hex(biasBpe), src1=sgpr("SrdBias+2"), comment="scaled by BPE"))
+      # Recalculate bias length (SrdBias only valid for BufferLoad=1)
+      if kernel["BufferLoad"]:
+        module.add(SMulI32(dst=sgpr("SrdBias+2"), src0=hex(biasBpe), src1=sgpr("SrdBias+2"), comment="scaled by BPE"))
       if biasOffsetVgpr not in offsetIsInit:
         offsetIsInit[biasOffsetVgpr] = 1
         module.addModuleAsFlatItems(self.calculateVectorGlobalStride(offsetVgpr, biasOffsetVgpr, tmpSgpr, dim, "BiasStride"))
@@ -13919,10 +13939,10 @@ class KernelWriterAssembly(KernelWriter):
     if scaleBDataType:
       scaleBShiftOffset = self.getGlobalShiftOffset(kernel, scaleBDataType, gwvw)
       globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleB", scaleBOffsetVgpr, scaleBShiftOffset, scaleBDataType, scaleBBpe, gwvw, tmpVgpr1Res, scaleBDstVgpr, 1))
-    # Count global loads
+    # Count global loads (covers both buffer loads and flat loads)
     vlcnt = 0
     for item in globalLoadsModule.items():
-      if isinstance(item, MUBUFReadInstruction):
+      if isinstance(item, GlobalReadInstruction):
         vlcnt = vlcnt + 1
     module.add(globalLoadsModule)
     assert vlcnt > 0
@@ -14067,8 +14087,9 @@ class KernelWriterAssembly(KernelWriter):
     gsuComponent = Component.GSU.find(self)
     module.add(gsuComponent.writeBiasToGlobal(self, kernel, biasDataType, tP, tmpSgprRes, biasBpe))
 
-    # Num records
-    module.add(SMulI32(dst=sgpr("SrdBias+2"), src0=hex(biasBpe), src1=sgpr("SrdBias+2"), comment="scaled by BPE"))
+    # Num records (SrdBias only valid for BufferStore=1; flat store uses pre-computed 64-bit address)
+    if kernel["BufferStore"]:
+      module.add(SMulI32(dst=sgpr("SrdBias+2"), src0=hex(biasBpe), src1=sgpr("SrdBias+2"), comment="scaled by BPE"))
 
     # Local read
     # remaining size % VW
@@ -14230,10 +14251,14 @@ class KernelWriterAssembly(KernelWriter):
     with self.allocTmpSgpr(1, 1) as tmpSgprRes:
       module.add(SMovB32(dst=sgpr(tmpSgprRes.idx), src=hex(mt//gwvw), comment="%d=%d//%d"%(mt//gwvw, mt, gwvw)))
       module.add(VCmpXLtU32(dst=EXEC(), src0=vgpr("Serial"), src1=sgpr(tmpSgprRes.idx), comment="if serial < MacroTile%d/gwvw"%tile01))
-    addr0 = vgpr(offsetVgpr)
-    addr1 = sgpr("SrdBias", 4)
+    if kernel["BufferStore"]:
+      addr0 = vgpr(offsetVgpr)
+      addr1 = sgpr("SrdBias", 4)
+    else:
+      addr0 = vgpr(offsetVgpr, 2)
+      addr1 = ""
     dataType = biasDataType
-    useBuffer = kernel["BufferLoad"]
+    useBuffer = kernel["BufferStore"]
     tmpVgprN = tmpVgpr1
     if enablePack: # no partial
       bps = biasDataType.numBytes() * gwvw
