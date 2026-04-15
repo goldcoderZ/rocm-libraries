@@ -359,12 +359,18 @@ consteval bool isValidWaveTile(DataType a_dtype, int m, int n, int k, GpuTarget 
             return true;
         if(m == 32 && n == 32 && (k == 8 || k == 16))
             return true;
+        // Non-square MFMA tiles (v_mfma_f32_4x4x4f16 tiled across wavefront)
+        if((m == 4 && n == 64 && k == 16) || (m == 64 && n == 4 && k == 16))
+            return true;
     }
     if(a_dtype == DataType::BF16)
     {
         if(m == 16 && n == 16 && (k == 16 || k == 32))
             return true;
         if(m == 32 && n == 32 && (k == 8 || k == 16))
+            return true;
+        // Non-square MFMA tiles (v_mfma_f32_4x4x4bf16 tiled across wavefront)
+        if((m == 4 && n == 64 && k == 16) || (m == 64 && n == 4 && k == 16))
             return true;
     }
 
