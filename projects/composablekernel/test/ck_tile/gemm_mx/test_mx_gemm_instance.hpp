@@ -89,7 +89,6 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                          GemmConfig::NumWaveGroups,
                                          false,
                                          1,
-                                         GemmConfig::TiledMMAPermuteN,
                                          ck_tile::MXEpilogueTraits<GemmConfig>::BlockedXDLNPerWarp>;
 
     using GemmEpilogue = ck_tile::CShuffleEpilogue<GemmEpilogueProblem>;
