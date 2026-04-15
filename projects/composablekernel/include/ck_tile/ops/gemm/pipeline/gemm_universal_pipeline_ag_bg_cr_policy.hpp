@@ -43,17 +43,11 @@ struct UniversalGemmBasePolicy
     // - For 2-byte types (fp16/bf16): K warp tile <= 32
     template <typename Problem>
     static constexpr bool is_a_load_tr = []() {
-        using ADataType              = remove_cvref_t<typename Problem::ADataType>;
-        using BDataType              = remove_cvref_t<typename Problem::BDataType>;
-        using WarpTile               = typename Problem::BlockGemmShape::WarpTile;
-        constexpr index_t kKWarpTile = WarpTile::at(number<2>{});
-        // Max K warp tile for transpose load based on data type size
-        constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType = remove_cvref_t<typename Problem::BDataType>;
         if constexpr(std::is_same_v<ADataType, float>)
             return false;
         else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
-            return false;
-        else if constexpr(kKWarpTile > kMaxKWarpTile)
             return false;
         else
             return std::is_same_v<remove_cvref_t<typename Problem::ALayout>,
@@ -62,16 +56,10 @@ struct UniversalGemmBasePolicy
 
     template <typename Problem>
     static constexpr bool is_b_load_tr = []() {
-        using BDataType              = remove_cvref_t<typename Problem::BDataType>;
-        using WarpTile               = typename Problem::BlockGemmShape::WarpTile;
-        constexpr index_t kKWarpTile = WarpTile::at(number<2>{});
-        // Max K warp tile for transpose load based on data type size
-        constexpr index_t kMaxKWarpTile = (sizeof(BDataType) == 1) ? 64 : 32;
+        using BDataType = remove_cvref_t<typename Problem::BDataType>;
         if constexpr(std::is_same_v<BDataType, float>)
             return false;
         else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
-            return false;
-        else if constexpr(kKWarpTile > kMaxKWarpTile)
             return false;
         else
             return std::is_same_v<remove_cvref_t<typename Problem::BLayout>,
@@ -706,6 +694,24 @@ struct UniversalGemmBasePolicy
     CK_TILE_HOST_DEVICE static constexpr auto IsTransposeC()
     {
         return Problem::TransposeC;
+    }
+
+    template <typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeDramTensorView(const WindowTmp& window_tmp)
+    {
+        return window_tmp.get_bottom_tensor_view();
+    }
+
+    template <typename Problem, typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeADramTensorView(const WindowTmp& window_tmp)
+    {
+        return MakeDramTensorView(window_tmp);
+    }
+
+    template <typename Problem, typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBDramTensorView(const WindowTmp& window_tmp)
+    {
+        return MakeDramTensorView(window_tmp);
     }
 
     template <typename Problem>

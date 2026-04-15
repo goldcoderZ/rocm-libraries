@@ -106,6 +106,8 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompAsyncEightWaves, Problem>
 
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsyncEightWaves"; }
 };
+template <typename T>
+using has_async = decltype(T::Async);
 
 template <typename Tuple, typename Derived>
 class TestCkTileGemmPipeline : public ::testing::Test
@@ -139,6 +141,17 @@ class TestCkTileGemmPipeline : public ::testing::Test
     using ADataTypeBuf = ck_tile::if_select_t<ADataType, ck_tile::tf32_t, float, ADataType>;
     using BDataTypeBuf = ck_tile::if_select_t<BDataType, ck_tile::tf32_t, float, BDataType>;
 
+    static constexpr bool IsAsync_v = [] {
+        if constexpr(ck_tile::is_detected<has_async, Derived>{})
+        {
+            return Derived::Async;
+        }
+        else
+        {
+            return false;
+        }
+    }();
+
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     void invoke_gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
@@ -165,6 +178,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
         constexpr ck_tile::index_t TileParitionerGroupNum = 8;
         constexpr ck_tile::index_t TileParitionerM01      = 4;
 
+        constexpr ck_tile::index_t VectorSize = 16;
+
         // ===============================================
 
         using GemmShape =
@@ -185,7 +200,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                                                      StructuredSparsity,
                                                                      Persistent,
                                                                      NumWaveGroup,
-                                                                     preshuffle>;
+                                                                     preshuffle,
+                                                                     VectorSize,
+                                                                     IsAsync_v>;
 
         using UniversalGemmProblem =
             ck_tile::UniversalGemmPipelineProblem<ADataTypeBuf,
@@ -264,10 +281,10 @@ class TestCkTileGemmPipeline : public ::testing::Test
             GTEST_SKIP() << "Unsupported data type combination for gemm pipeline test.";
         }
         if constexpr(PipelineType == GemmPipelineType::CompV4 ||
-                     PipelineType == GemmPipelineType::CompAsyncEightWaves ||
+                     PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v ||
                      std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
-            // Only do k_batch = 1 when pipeline is CompV4, or BDataType is I4
+            // Only do k_batch = 1 when pipeline is CompV4, BDataType is I4 or async pipeline
             k_batches_ = {1};
         }
         else

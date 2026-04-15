@@ -51,33 +51,23 @@ struct GemmPipelineAgBgCrImplBase
     // - For 2-byte types (fp16/bf16): K warp tile <= 32
     // - For 4-byte types (float/tf32): transpose load not supported
     static constexpr bool is_a_load_tr = []() {
-        using WarpTile                  = typename BlockGemmShape::WarpTile;
-        constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
-        constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
         if constexpr(std::is_same_v<ADataType, float>)
             return false;
         else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
             return false;
         else if constexpr(sizeof(ADataType) >= 4)
             return false; // 4-byte types (float/tf32) don't support transpose load
-        else if constexpr(kKWarpTile > kMaxKWarpTile)
-            return false;
         else
             return std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
     }();
 
     static constexpr bool is_b_load_tr = []() {
-        using WarpTile                  = typename BlockGemmShape::WarpTile;
-        constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
-        constexpr index_t kMaxKWarpTile = (sizeof(BDataType) == 1) ? 64 : 32;
         if constexpr(std::is_same_v<BDataType, float>)
             return false;
         else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
             return false;
         else if constexpr(sizeof(BDataType) >= 4)
             return false; // 4-byte types (float/tf32) don't support transpose load
-        else if constexpr(kKWarpTile > kMaxKWarpTile)
-            return false;
         else
             return std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
     }();
@@ -174,11 +164,12 @@ struct GemmPipelineAgBgCrImplBase
         // A DRAM tile window for load
         auto a_copy_dram_window = generate_tuple(
             [&](auto idx) {
-                return make_tile_window(
-                    dram_block_window_tmp[number<idx>{}].get_bottom_tensor_view(),
-                    make_tuple(YPerTile{}, XPerTile{}),
-                    dram_block_window_tmp[number<idx>{}].get_window_origin() + offset,
-                    Policy::template MakeADramTileDistribution<Problem>());
+                return make_tile_window(Policy::template MakeADramTensorView<Problem>(
+                                            dram_block_window_tmp[number<idx>{}]),
+                                        make_tuple(YPerTile{}, XPerTile{}),
+                                        dram_block_window_tmp[number<idx>{}].get_window_origin() +
+                                            offset,
+                                        Policy::template MakeADramTileDistribution<Problem>());
             },
             number<DramBlockWindowTmp::size()>{});
         return std::move(a_copy_dram_window);
@@ -196,7 +187,7 @@ struct GemmPipelineAgBgCrImplBase
         using XPerTile = std::conditional_t<is_col_major, number<MPerBlock>, number<KPerBlock>>;
         // A DRAM tile window for load
         auto a_copy_dram_window =
-            make_tile_window(dram_block_window_tmp.get_bottom_tensor_view(),
+            make_tile_window(Policy::template MakeADramTensorView<Problem>(dram_block_window_tmp),
                              make_tuple(YPerTile{}, XPerTile{}),
                              dram_block_window_tmp.get_window_origin() + offset,
                              Policy::template MakeADramTileDistribution<Problem>());
@@ -217,11 +208,12 @@ struct GemmPipelineAgBgCrImplBase
         // A DRAM tile window for load
         auto a_copy_dram_window = generate_tuple(
             [&](auto idx) {
-                return make_tile_window(
-                    dram_block_window_tmp[number<idx>{}].get_bottom_tensor_view(),
-                    make_tuple(YPerTile{}, XPerTile{}),
-                    dram_block_window_tmp[number<idx>{}].get_window_origin() + offset,
-                    Policy::template MakeBDramTileDistribution<Problem>());
+                return make_tile_window(Policy::template MakeBDramTensorView<Problem>(
+                                            dram_block_window_tmp[number<idx>{}]),
+                                        make_tuple(YPerTile{}, XPerTile{}),
+                                        dram_block_window_tmp[number<idx>{}].get_window_origin() +
+                                            offset,
+                                        Policy::template MakeBDramTileDistribution<Problem>());
             },
             number<DramBlockWindowTmp::size()>{});
         return std::move(a_copy_dram_window);
@@ -239,7 +231,7 @@ struct GemmPipelineAgBgCrImplBase
         using XPerTile = std::conditional_t<is_row_major, number<NPerBlock>, number<KPerBlock>>;
         // A DRAM tile window for load
         auto a_copy_dram_window =
-            make_tile_window(dram_block_window_tmp.get_bottom_tensor_view(),
+            make_tile_window(Policy::template MakeBDramTensorView<Problem>(dram_block_window_tmp),
                              make_tuple(YPerTile{}, XPerTile{}),
                              dram_block_window_tmp.get_window_origin() + offset,
                              Policy::template MakeBDramTileDistribution<Problem>());

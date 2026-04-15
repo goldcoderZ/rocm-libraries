@@ -38,6 +38,7 @@ struct UniversalInvoker
                                                        GemmConfig::TileParitionerGroupNum,
                                                        GemmConfig::TileParitionerM01>;
 
+        constexpr ck_tile::index_t VectorSize = 16;
         using GemmUniversalTraits =
             ck_tile::TileGemmUniversalTraits<GemmConfig::kPadM,
                                              GemmConfig::kPadN,
@@ -50,7 +51,9 @@ struct UniversalInvoker
                                              GemmConfig::UseStructuredSparsity,
                                              Persistent,
                                              GemmConfig::NumWaveGroups,
-                                             GemmConfig::Preshuffle>;
+                                             GemmConfig::Preshuffle,
+                                             VectorSize,
+                                             GemmConfig::Async>;
 
         constexpr auto scheduler = GemmConfig::Scheduler;
 
@@ -181,6 +184,7 @@ struct UniversalInvoker
                                                        GemmConfig::TileParitionerGroupNum,
                                                        GemmConfig::TileParitionerM01>;
 
+        constexpr ck_tile::index_t VectorSize = 16;
         using GemmUniversalTraits =
             ck_tile::TileGemmUniversalTraits<GemmConfig::kPadM,
                                              GemmConfig::kPadN,
@@ -193,7 +197,9 @@ struct UniversalInvoker
                                              GemmConfig::UseStructuredSparsity,
                                              true, // Persistent = true for async test
                                              GemmConfig::NumWaveGroups,
-                                             GemmConfig::Preshuffle>;
+                                             GemmConfig::Preshuffle,
+                                             VectorSize,
+                                             GemmConfig::Async>;
 
         constexpr auto scheduler = GemmConfig::Scheduler;
 
