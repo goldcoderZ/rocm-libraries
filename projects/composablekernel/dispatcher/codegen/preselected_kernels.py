@@ -14,7 +14,7 @@ Curated kernel sets optimized for different workload characteristics:
 
 from functools import partial, lru_cache
 from typing import List
-from unified_gemm_codegen import KernelConfig, TileConfig, TraitConfig, GemmVariant
+from gemm_config import GemmVariant, KernelConfig, TileConfig, TraitConfig
 
 
 # ============================================================================

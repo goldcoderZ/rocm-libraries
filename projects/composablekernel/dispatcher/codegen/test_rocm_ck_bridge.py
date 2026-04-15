@@ -36,12 +36,7 @@ from rocm_ck_bridge import (
 )
 
 # Import dispatcher types for translation tests
-from unified_gemm_codegen import (
-    GemmVariant,
-    KernelConfig,
-    TileConfig,
-    TraitConfig,
-)
+from gemm_config import GemmVariant, KernelConfig, TileConfig, TraitConfig
 
 
 # ============================================================================
