@@ -29,6 +29,10 @@ struct GemmPipelineAgBgCrDefaultPolicy
         return IsTranspose ? 2 * sizeof(DataType) : WarpTileK / kpack / NumAccess;
     };
 
+    template <typename DataType, bool IsTranspose>
+    static constexpr auto get_swizzle_groupsize =
+        []() { return (IsTranspose && sizeof(DataType) == 1) ? 2 : 1; };
+
     template <index_t YPerBlock,
               typename DataType,
               typename WarpTile,
@@ -55,9 +59,10 @@ struct GemmPipelineAgBgCrDefaultPolicy
         const index_t Y0     = integer_divide_ceil(Ys, Y1 * Y2);
         const auto Y_lens    = make_tuple(Y0, number<Y1>{}, number<Y2>{});
 
+        constexpr index_t X2 = get_swizzle_groupsize<DataType, IsTranspose>();
         constexpr index_t X1 = get_swizzle_factor<DataType, WarpTile, IsTranspose>(KPack);
-        const index_t X0     = integer_divide_ceil(Xs, X1);
-        const auto X_lens    = make_tuple(X0, number<X1>{});
+        const index_t X0     = integer_divide_ceil(Xs, X1 * X2);
+        const auto X_lens    = make_tuple(X0, number<X1>{}, number<X2>{});
 
         const auto& desc_0 = tensor_view_tmp.get_tensor_descriptor();
 
@@ -65,22 +70,25 @@ struct GemmPipelineAgBgCrDefaultPolicy
             desc_0,
             make_tuple(make_unmerge_transform(X_lens), make_unmerge_transform(Y_lens)),
             make_tuple(sequence<0>{}, sequence<1>{}),
-            make_tuple(sequence<0, 1>{}, sequence<2, 3, 4>{}));
+            make_tuple(sequence<0, 1, 2>{}, sequence<3, 4, 5>{}));
 
         const auto desc_2 = transform_tensor_descriptor(
             desc_1,
             make_tuple(make_pass_through_transform(X0),
+                       make_pass_through_transform(X2),
                        make_xor_transform(make_tuple(number<X1>{}, number<Y1>{})),
                        make_pass_through_transform(Y0),
                        make_pass_through_transform(number<Y2>{})),
-            make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}, sequence<4>{}),
-            make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}, sequence<4>{}));
+            make_tuple(
+                sequence<0>{}, sequence<2>{}, sequence<1, 4>{}, sequence<3>{}, sequence<5>{}),
+            make_tuple(
+                sequence<0>{}, sequence<2>{}, sequence<1, 4>{}, sequence<3>{}, sequence<5>{}));
 
         const auto desc =
             transform_tensor_descriptor(desc_2,
                                         make_tuple(make_merge_transform_v3_division_mod(X_lens),
                                                    make_merge_transform_v3_division_mod(Y_lens)),
-                                        make_tuple(sequence<0, 1>{}, sequence<2, 3, 4>{}),
+                                        make_tuple(sequence<0, 1, 2>{}, sequence<3, 4, 5>{}),
                                         make_tuple(sequence<0>{}, sequence<1>{}));
 
         auto&& byte_ptr = &(tensor_view_tmp.get_buffer_view()(0));
@@ -225,13 +233,16 @@ struct GemmPipelineAgBgCrDefaultPolicy
         constexpr index_t Y0 = YPerBlock / (Y1 * Y2);
         static_assert(Y0 * Y1 * Y2 == YPerBlock, "Y0, Y1, Y2 must cover whole YPerBlock!");
 
-        constexpr index_t WaveSize = get_warp_size();
+        constexpr index_t WaveSize            = get_warp_size();
+        constexpr index_t NumThreadsPadRegion = IsTranspose ? NumContiguousElements : WaveSize;
 
+        constexpr index_t X4 = get_swizzle_groupsize<DataType, IsTranspose>();
         constexpr index_t X3 = get_swizzle_factor<DataType, WarpTile, IsTranspose>(KPack);
-        constexpr index_t X2 = WaveSize / Y1 / X3;
-        constexpr index_t X1 = XPerXdl / (X2 * X3);
-        constexpr index_t X0 = XPerBlock / (X1 * X2 * X3);
-        static_assert(X0 * X1 * X2 * X3 == XPerBlock, "X0, X1, X2, X3 must cover whole XPerBlock!");
+        constexpr index_t X2 = NumThreadsPadRegion / Y1 / X3 / X4;
+        constexpr index_t X1 = XPerXdl / (X2 * X3 * X4);
+        constexpr index_t X0 = XPerBlock / (X1 * X2 * X3 * X4);
+        static_assert(X0 * X1 * X2 * X3 * X4 == XPerBlock,
+                      "X0, X1, X2, X3 must cover whole XPerBlock!");
 
         constexpr index_t Pad = X3 * Y2;
 
@@ -241,12 +252,14 @@ struct GemmPipelineAgBgCrDefaultPolicy
                        number<X1>{},
                        number<X2>{},
                        number<X3>{},
+                       number<X4>{},
                        number<Y1>{},
                        number<Y2>{}),
-            make_tuple(number<Y0*(X1 * (X2 * X3 * Y1 * Y2) + (X1 - 1) * Pad)>{},
-                       number<X1*(X2 * X3 * Y1 * Y2) + (X1 - 1) * Pad>{},
-                       number<X2 * X3 * Y1 * Y2 + Pad>{},
-                       number<X3 * Y1 * Y2>{},
+            make_tuple(number<Y0*(X1 * (X2 * X3 * X4 * Y1 * Y2) + (X1 - 1) * Pad)>{},
+                       number<X1*(X2 * X3 * X4 * Y1 * Y2) + (X1 - 1) * Pad>{},
+                       number<X2 * X3 * X4 * Y1 * Y2 + Pad>{},
+                       number<X3 * X4 * Y1 * Y2>{},
+                       number<X4 * Y1 * Y2>{},
                        number<Y1 * Y2>{},
                        number<Y2>{},
                        number<1>{}),
@@ -259,28 +272,31 @@ struct GemmPipelineAgBgCrDefaultPolicy
                        make_pass_through_transform(number<Y0>{}),
                        make_pass_through_transform(number<X1>{}),
                        make_pass_through_transform(number<X2>{}),
+                       make_pass_through_transform(number<X4>{}),
                        make_xor_transform(make_tuple(number<X3>{}, number<Y1>{})),
                        make_pass_through_transform(number<Y2>{})),
             make_tuple(sequence<0>{},
                        sequence<1>{},
                        sequence<2>{},
                        sequence<3>{},
-                       sequence<4, 5>{},
-                       sequence<6>{}),
+                       sequence<5>{},
+                       sequence<4, 6>{},
+                       sequence<7>{}),
             make_tuple(sequence<0>{},
                        sequence<1>{},
                        sequence<2>{},
                        sequence<3>{},
-                       sequence<4, 5>{},
-                       sequence<6>{}));
+                       sequence<5>{},
+                       sequence<4, 6>{},
+                       sequence<7>{}));
 
         constexpr auto a_lds_block_desc = transform_tensor_descriptor(
             a_lds_block_desc_1,
-            make_tuple(make_merge_transform_v3_division_mod(
-                           make_tuple(number<X0>{}, number<X1>{}, number<X2>{}, number<X3>{})),
+            make_tuple(make_merge_transform_v3_division_mod(make_tuple(
+                           number<X0>{}, number<X1>{}, number<X2>{}, number<X3>{}, number<X4>{})),
                        make_merge_transform_v3_division_mod(
                            make_tuple(number<Y0>{}, number<Y1>{}, number<Y2>{}))),
-            make_tuple(sequence<0, 2, 3, 4>{}, sequence<1, 5, 6>{}),
+            make_tuple(sequence<0, 2, 3, 4, 5>{}, sequence<1, 6, 7>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
 
         return a_lds_block_desc;
@@ -333,7 +349,10 @@ struct GemmPipelineAgBgCrDefaultPolicy
 
         constexpr index_t vector_size =
             DS_READ_TR_SIZE() / sizeof(typename Problem::ComputeDataType);
-        constexpr index_t thread_elements = WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size();
+        constexpr index_t MaxElementsPerInst =
+            get_max_mem_vec_inst_width() / sizeof(typename Problem::ComputeDataType);
+        constexpr index_t thread_elements =
+            std::min(WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size(), MaxElementsPerInst);
         constexpr auto wg_attr_num_access_A =
             !(is_a_load_tr<Problem>)             ? WGAttrNumAccessEnum::Single
             : vector_size == thread_elements     ? WGAttrNumAccessEnum::Single
