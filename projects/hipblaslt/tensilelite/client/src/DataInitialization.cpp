@@ -2768,8 +2768,6 @@ namespace TensileLite
                         totalSlotCount,
                         stream,
                         m_activeRotatingBuffers);
-                    auto slotWorkspace = createBenchLikeWorkspaceSlots(
-                        m_workspaceSize, totalSlotCount, stream, m_activeRotatingBuffers);
 
                     inputArr.clear();
                     for(int32_t slot = 0; slot < totalSlotCount; slot++)
@@ -2785,7 +2783,9 @@ namespace TensileLite
                         newInputs.scaleB        = slotScaleB[slot];
                         newInputs.scaleAlphaVec = slotScaleAlphaVec[slot];
                         newInputs.metadata      = (unsigned char*)slotMetadata[slot];
-                        newInputs.ws            = slotWorkspace[slot];
+                        // hipblaslt-bench cpp/c path rotates tensors by block_count
+                        // but reuses the same workspace pointer across iterations.
+                        newInputs.ws = castInputs->ws;
                         inputArr.push_back(static_pointer_cast<ProblemInputs>(
                             std::make_shared<ContractionInputs>(newInputs)));
                     }
