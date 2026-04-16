@@ -154,6 +154,8 @@ template <typename ADataType_,
           MmaOpFamily OpFamily_>
 struct amdgcn_mma_base
 {
+    static constexpr const char* instruction_name = "Unknown";
+
     using OpType                          = OpType_;
     static constexpr MmaOpFamily OpFamily = OpFamily_;
 
@@ -365,9 +367,9 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
     printf("               kCMBlocks                : %d\n", mmaObj.kCMBlocks);
     printf("               kCNBlocks                : %d\n", mmaObj.kCNBlocks);
     printf("               CBlockDimInVecDim        : %d\n", mmaObj.CBlockDimInVecDim);
+    printf("Instruction    name                     : %s\n", ObjType::instruction_name);
     if constexpr(!std::is_same_v<CtrlFlags, void>)
     {
-        printf("Instruction    name                     : %s\n", ObjType::instruction_name);
         print_flags(CtrlFlags{});
     }
     print(CompilerTarget{});
