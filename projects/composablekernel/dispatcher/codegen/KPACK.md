@@ -3,7 +3,7 @@
 The `--output-format kpack` flag generates self-describing `.kpack` archives
 for runtime kernel loading. Kernels are loaded at runtime via
 `hipModuleLaunchKernel` — the host binary needs no CK Tile template headers.
-A single archive can contain binaries for multiple GPU architectures.
+Each archive targets a single GPU architecture.
 
 This is a design proof of concept for the rocm-ck integration path.
 
@@ -12,37 +12,71 @@ This is a design proof of concept for the rocm-ck integration path.
 ```bash
 cd dispatcher/codegen
 
-# Generate a kpack archive for two GPU architectures
+# Preselected essential set (6 kernels — fast build, good coverage)
 python3 unified_gemm_codegen.py \
     --output-dir ./build \
     --datatype fp16 \
     --layout rcr \
     --output-format kpack \
-    --arch gfx90a \
-    --arch gfx942
-
-# With zstd compression
-python3 unified_gemm_codegen.py \
-    --output-dir ./build \
-    --datatype fp16 \
-    --layout rcr \
-    --output-format kpack \
-    --arch gfx90a \
-    --arch gfx942 \
-    --zstd
+    --gpu-target gfx90a \
+    --zstd \
+    --preselected fp16_rcr_essential
 ```
 
 This produces `build/gemm.kpack` containing compiled `.hsaco` blobs and
 structured `GemmSpec` metadata for every kernel variant.
+
+### Larger builds
+
+```bash
+# Full tile sweep with padding, no persistent (all tiles, all problem sizes)
+python3 unified_gemm_codegen.py \
+    --output-dir ./build \
+    --datatype fp16 \
+    --layout rcr \
+    --output-format kpack \
+    --gpu-target gfx90a \
+    --zstd \
+    --tile-config-json '{
+        "tile_config": {
+            "tile_m": [64, 128, 192, 256], "tile_n": [64, 128, 192, 256],
+            "tile_k": [64, 128, 192, 256],
+            "warp_m": [1, 2, 4], "warp_n": [1, 2, 4], "warp_k": [1],
+            "warp_tile_m": [4, 16, 32], "warp_tile_n": [16, 32, 64],
+            "warp_tile_k": [8, 16, 32, 64, 128]
+        },
+        "trait_config": {
+            "pipeline": ["compv3", "compv4", "mem"],
+            "epilogue": ["cshuffle", "default"],
+            "scheduler": ["intrawave", "interwave"],
+            "pad_m": [true], "pad_n": [true], "pad_k": [false],
+            "persistent": [false]
+        }
+    }'
+
+# Full sweep: all pipelines, schedulers, tile shapes, persistent modes
+python3 unified_gemm_codegen.py \
+    --output-dir ./build \
+    --datatype fp16 \
+    --layout rcr \
+    --output-format kpack \
+    --gpu-target gfx90a \
+    --zstd
+```
+
+Available preselected sets: `fp16_rcr_essential`, `bf16_rcr_essential`,
+`int8_rcr_essential`, `fp8_rcr_essential`, `mixed_precision`.
 
 ## Kpack CLI flags
 
 | Flag | Description |
 |------|-------------|
 | `--output-format kpack` | Enable kpack mode |
-| `--arch ARCH` | GPU architecture to compile for (repeatable). Defaults to `--gpu-target` |
-| `--rocm-path PATH` | ROCm installation path (default: `/opt/rocm`) |
+| `--gpu-target ARCH` | GPU architecture to compile for |
 | `--zstd` | Enable zstd-per-kernel compression |
+| `--preselected SET` | Use a curated kernel set (see above) |
+| `--tile-config-json JSON` | Narrow the tile/trait sweep |
+| `--rocm-path PATH` | ROCm installation path (default: `/opt/rocm`) |
 | `--no-clean` | Skip cleaning stale artifacts from output dir |
 
 ## Running a kpack with the dispatcher
@@ -70,27 +104,13 @@ python3 unified_gemm_codegen.py \
     --datatype fp16 \
     --layout rcr \
     --output-format kpack \
-    --arch gfx90a
+    --gpu-target gfx90a \
+    --zstd \
+    --preselected fp16_rcr_essential
 
 # 2. Run it through the dispatcher
 cd ../../experimental/rocm_ck/tools/dispatcher_bridge
 build/dispatcher_bridge ../../../../dispatcher/codegen/build/gemm.kpack
-```
-
-Expected output (on gfx90a):
-
-```
-Registered 15 kernels from kpack
-
-Registered kernels:
-  gemm_fp16                       fp16_rcr_compv1_intrawave_cshuffle_128x128x32_...
-  gemm_bf16                       bf16_rcr_compv1_intrawave_cshuffle_128x128x32_...
-  ...
-
-Running gemm_fp16: M=512, N=512, K=256, block=256
-gemm_fp16: PASSED  (0.123 ms, max_rel_err=1.23e-04, errors=0/262144)
-validate(): PASSED
-Performance: 1.23 TFLOPS
 ```
 
 ### How it works
@@ -155,15 +175,15 @@ unified_gemm_codegen.py  --output-format kpack
 ```
 gemm.kpack
   [header]    KPAK magic + version + toc_offset
-  [blobs]     .hsaco binaries (one per kernel x arch)
+  [blobs]     .hsaco binaries (one per kernel)
   [TOC]       msgpack map:
                 compression_scheme: "none" | "zstd-per-kernel"
-                gfx_arches: ["gfx90a", "gfx942"]
+                gfx_arches: ["gfx90a"]
                 toc: { kernel_name: { arch: { ordinal, size } } }
                 variant_specs: {
                   kernel_name: {
                     spec_type: "GemmSpec",
-                    targets: ["gfx90a", "gfx942"],
+                    targets: ["gfx90a"],
                     spec: { physical_tensors, block_tile, pipeline, ... }
                   }
                 }

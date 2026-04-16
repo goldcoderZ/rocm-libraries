@@ -939,7 +939,6 @@ class UnifiedGemmCodegen:
         enable_arch_filter: bool = True,
         kernel_set_name: Optional[str] = None,
         output_format: str = "hpp",
-        kpack_arches: Optional[List[str]] = None,
         rocm_path: str = "/opt/rocm",
         kpack_zstd: bool = False,
         clean: bool = True,
@@ -957,7 +956,6 @@ class UnifiedGemmCodegen:
         self.use_preselected = use_preselected
         self.kernel_set_name = kernel_set_name
         self.output_format = output_format
-        self.kpack_arches = kpack_arches or [gpu_target]
         self.rocm_path = rocm_path
         self.kpack_zstd = kpack_zstd
 
@@ -1066,7 +1064,7 @@ class UnifiedGemmCodegen:
         if self.use_preselected:
             log.info(f"  Using preselected set: {self.use_preselected}")
         if self.output_format == "kpack":
-            log.info(f"  Architectures: {', '.join(self.kpack_arches)}")
+            log.info(f"  Architecture: {self.gpu_target}")
 
         results = {"kernels": [], "wrappers": [], "failed": []}
 
@@ -1367,7 +1365,7 @@ class UnifiedGemmCodegen:
                 kernel_name,
                 self.datatype,
                 self.layout,
-                targets=self.kpack_arches,
+                targets=[self.gpu_target],
             )
             spec_path = self.kernel_dir / f"{kernel_name}.spec.json"
             spec_path.write_text(json.dumps(spec, indent=2) + "\n")
@@ -1415,15 +1413,11 @@ namespace ck_tile {{ namespace generated {{
             return None
 
         # Compile all .hip files to .hsaco (parallel per kernel x arch)
-        log.info(
-            f"Compiling {len(hip_paths)} kernels for {len(self.kpack_arches)} arch(es)..."
-        )
-        compile_jobs = [
-            (Path(hip), arch) for hip in hip_paths for arch in self.kpack_arches
-        ]
+        log.info(f"Compiling {len(hip_paths)} kernels for {self.gpu_target}...")
+        compile_jobs = [(Path(hip), self.gpu_target) for hip in hip_paths]
 
         failures = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
             futures = {
                 pool.submit(
                     KpackGenerator.compile_hsaco,
@@ -1662,13 +1656,6 @@ def main():
         "kpack: compiled .kpack archive for runtime loading via rocm-ck.",
     )
     parser.add_argument(
-        "--arch",
-        action="append",
-        dest="kpack_arches",
-        help="GPU architectures to compile .hsaco for (kpack mode, repeatable). "
-        "Defaults to --gpu-target value.",
-    )
-    parser.add_argument(
         "--rocm-path",
         default="/opt/rocm",
         help="ROCm installation path (kpack mode, default: /opt/rocm)",
@@ -1763,7 +1750,6 @@ def main():
         enable_arch_filter=not args.no_arch_filter,
         kernel_set_name=args.kernel_set,
         output_format=args.output_format,
-        kpack_arches=args.kpack_arches,
         rocm_path=args.rocm_path,
         kpack_zstd=args.zstd,
         clean=not args.no_clean,

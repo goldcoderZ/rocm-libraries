@@ -58,7 +58,6 @@ def _make_codegen(tmp_path, **kwargs):
         gpu_target="gfx942",
         use_preselected="fp16_rcr_essential",
         output_format="kpack",
-        kpack_arches=["gfx942"],
         clean=True,
     )
     defaults.update(kwargs)
