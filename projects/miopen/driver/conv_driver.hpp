@@ -1448,13 +1448,22 @@ int ConvDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
             new GPUMem(ctx, GetTensorSize(weightTensor_vect4), sizeof(Tgpu), buffer_check));
     }
 
-    outhost   = tensor<Tref>(miopen::deref(outputTensor).GetLayout_t(),
+    const auto output_layout_opt = miopen::deref(outputTensor).GetLayoutEnum();
+    const auto input_layout_opt  = miopen::deref(inputTensor).GetLayoutEnum();
+    const auto weight_layout_opt = miopen::deref(weightTensor).GetLayoutEnum();
+
+    if(!output_layout_opt || !input_layout_opt || !weight_layout_opt)
+    {
+        MIOPEN_THROW(miopenStatusInternalError, "Unknown layout");
+    }
+
+    outhost   = tensor<Tref>(output_layout_opt.value(),
                            miopen::deref(outputTensor).GetLengths(),
                            miopen::deref(outputTensor).GetStrides());
-    din_host  = tensor<Tref>(miopen::deref(inputTensor).GetLayout_t(),
+    din_host  = tensor<Tref>(input_layout_opt.value(),
                             miopen::deref(inputTensor).GetLengths(),
                             miopen::deref(inputTensor).GetStrides());
-    dwei_host = tensor<Tref>(miopen::deref(weightTensor).GetLayout_t(),
+    dwei_host = tensor<Tref>(weight_layout_opt.value(),
                              miopen::deref(weightTensor).GetLengths(),
                              miopen::deref(weightTensor).GetStrides());
 

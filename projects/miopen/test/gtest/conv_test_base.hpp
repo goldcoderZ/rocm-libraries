@@ -37,6 +37,12 @@ using Direction = miopen::conv::Direction;
 
 struct GroupConvTestConfigBase
 {
+    GroupConvTestConfigBase()                                          = default;
+    GroupConvTestConfigBase(const GroupConvTestConfigBase&)            = default;
+    GroupConvTestConfigBase& operator=(const GroupConvTestConfigBase&) = default;
+    GroupConvTestConfigBase(GroupConvTestConfigBase&&)                 = default;
+    GroupConvTestConfigBase& operator=(GroupConvTestConfigBase&&)      = default;
+
     virtual ~GroupConvTestConfigBase() = default;
 };
 
@@ -391,7 +397,7 @@ protected:
 
     void TearDownConv()
     {
-        ref_out = tensor<Tref>{output.desc.GetLayout_t(), output.desc.GetLengths()};
+        ref_out = tensor<Tref>{output.desc.GetLayoutEnum().value(), output.desc.GetLengths()};
         if(use_cpu_ref)
         {
             cpu_convolution_forward(conv_desc.GetSpatialDimension(),

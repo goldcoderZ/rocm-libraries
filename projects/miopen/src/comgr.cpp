@@ -269,7 +269,6 @@ static std::string to_string(const amd_comgr_action_kind_t val)
     std::ostringstream oss;
     MIOPEN_LOG_ENUM(oss,
                     val,
-                    AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS,
                     AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE,
                     AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
                     AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
@@ -603,7 +602,6 @@ void BuildOcl(const std::string& name,
         action.SetOptionList(optCompile);
 
         const Dataset addedPch;
-        action.Do(AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS, inputs, addedPch);
         const Dataset linkedBc;
         action.Do(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, addedPch, linkedBc);
 

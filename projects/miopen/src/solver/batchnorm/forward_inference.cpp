@@ -92,7 +92,13 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
                                    ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
                                    : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
 
-        if(problem.GetXDesc().GetLayout_t() == miopenTensorNHWC)
+        const auto layout = problem.GetXDesc().GetLayoutEnum();
+        if(!layout)
+        {
+            MIOPEN_THROW(miopenStatusInternalError, "Unknown layout");
+        }
+
+        if(layout.value() == miopenTensorNHWC)
         {
             xlocalsize = std::min(size_t{c / vectorsize}, max_localsize);
             xgridsize  = AlignUp(size_t{c / vectorsize}, xlocalsize);
@@ -193,7 +199,13 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             float alpha_activ = problem.GetActivationDesc().GetAlpha();
             float beta_activ  = problem.GetActivationDesc().GetBeta();
 
-            if(params.xDesc->GetLayout_t() == miopenTensorNHWC)
+            const auto layout = problem.GetXDesc().GetLayoutEnum();
+            if(!layout)
+            {
+                MIOPEN_THROW(miopenStatusInternalError, "Unknown layout");
+            }
+
+            if(layout.value() == miopenTensorNHWC)
             {
                 if(problem.isInverseVariance())
                 {

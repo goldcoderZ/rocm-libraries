@@ -169,6 +169,12 @@ class TargetProperties
     static const std::size_t MaxLocalMemorySize;
 
 public:
+    TargetProperties()                                   = default;
+    TargetProperties(const TargetProperties&)            = default;
+    TargetProperties& operator=(const TargetProperties&) = default;
+    TargetProperties(TargetProperties&&)                 = default;
+    TargetProperties& operator=(TargetProperties&&)      = default;
+
     virtual ~TargetProperties() = default;
 
     TargetPropertyXnack xnack;

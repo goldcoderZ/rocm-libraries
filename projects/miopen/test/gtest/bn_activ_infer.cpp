@@ -61,7 +61,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
 
     // Setup the kernel launch parameters
-    bool is_layout_NHWC = (xDesc.GetLayout_t() == miopenTensorNHWC);
+    bool is_layout_NHWC = (xDesc.GetLayoutEnum().value() == miopenTensorNHWC);
     size_t read_len     = (bn_mode == miopenBNSpatial) ? (is_layout_NHWC ? c : h * w) : c * h * w;
     size_t read_unit    = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
     // For vectorized r/rw of the input/output data
