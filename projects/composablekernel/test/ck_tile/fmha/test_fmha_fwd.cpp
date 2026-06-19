@@ -163,7 +163,7 @@ const ck_tile::stream_config stream_config{
 
 #define COMMON_ARGS                                                                              \
     init_method, static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))), 1, 0, \
-        "none", stream_config
+        "none", 1, stream_config
 
 auto EnableTestIf(bool condition)
 {
@@ -298,6 +298,7 @@ TEST(TestCkTileFmhaFwd, AppendKvWithBatchEffLensShouldFail)
         0,
         1,      // init_sink
         "none", // block_mask_str
+        0,      // pack_gqa
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -344,6 +345,7 @@ TEST(TestCkTileFmhaFwd, SplitKvWithGroupPaddingShouldFail)
         0,
         1,      // init_sink
         "none", // block_mask_str
+        0,      // pack_gqa
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -389,6 +391,7 @@ TEST(TestCkTileFmhaFwd, PagedKvWithGroupPaddingShouldFail)
         0,
         1,      // init_sink
         "none", // block_mask_str
+        0,      // pack_gqa
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -738,6 +741,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                  Values(3, 4),
                                  Values(std::tuple{4, 3, 1, 200, 1024, "0"},
                                         std::tuple{2, 2, -1, 512, 2000, "0"},
+                                        std::tuple{2, 8, 2, 1, 1024, "0"},
                                         std::tuple{3, 2, -1, 230, 899, "t:128,128"})));
 
 TEST_P(SplitKV, DataTypeConfig)
